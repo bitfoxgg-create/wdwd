@@ -327,14 +327,54 @@ async def cut_balance(message: Message):
         _, user_id, amount = message.text.split()
         user_id = int(user_id)
         amount = float(amount)
+
+        # Check user's current balance first
+        current_balance = await get_balance(user_id)
+        if amount > current_balance:
+            await message.answer(f"❌ Cannot cut ₹{amount}. User's current balance is only ₹{current_balance:.2f}.")
+            return
+
         async with aiosqlite.connect("bot.db") as db:
             await db.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amount, user_id))
             await db.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES (?, ?, ?, ?)", (user_id, "admin_cut", -amount, "Admin balance cut"))
             await db.commit()
+
         await message.answer(f"✅ Cut ₹{amount} from {user_id}")
         await bot.send_message(user_id, f"⚠️ Admin deducted ₹{amount} from your balance.")
     except:
         await message.answer("Usage: /cut USER_ID AMOUNT")
+
+@dp.message(Command("checkbal"))
+async def check_user_balance(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if not command.args:
+        await message.answer("❌ Missing User ID!\n\nUsage: `/checkbal 123456789`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        target_id = int(command.args.strip())
+        bal = await get_balance(target_id)
+        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}", parse_mode=ParseMode.MARKDOWN)
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Please provide a valid numeric ID.")
+
+@dp.message(Command("top"))
+async def top_balances(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    async with aiosqlite.connect("bot.db") as db:
+        cur = await db.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
+        rows = await cur.fetchall()
+
+    if not rows:
+        await message.answer("📭 No users found in database.")
+        return
+
+    text = "🏆 **Top 10 Balance Holders**\n\n"
+    for idx, (uid, bal) in enumerate(rows, start=1):
+        text += f"**{idx}.** User ID: `{uid}` — **₹{bal:.2f}**\n"
+
+    await message.answer(text, parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(Command("addtask"))
 async def add_task(message: Message, command: CommandObject):
