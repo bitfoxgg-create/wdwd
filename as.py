@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -13,7 +13,9 @@ from aiogram.types import (
     CallbackQuery,
     MessageEntity,
     InlineKeyboardMarkup,
-    InlineKeyboardButton
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton
 )
 import os
 from threading import Thread
@@ -123,7 +125,7 @@ async def init_db():
         ''')
 
 # ============================================
-# HELPERS
+# HELPERS & KEYBOARDS
 # ============================================
 
 async def ensure_user(user_id: int):
@@ -141,7 +143,19 @@ async def is_banned(user_id: int) -> bool:
         row = await conn.fetchrow("SELECT 1 FROM banned_users WHERE user_id=$1", user_id)
         return row is not None
 
-# Helper to edit message content safely whether it's text or photo
+def get_main_menu_keyboard():
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="✍️ Get Task")
+    kb.button(text="💼 My Task")
+    kb.button(text="📤 Submit Task")
+    kb.button(text="💰 Balance")
+    kb.button(text="😀 Sell Gmail")
+    kb.button(text="🧾 Withdraw")
+    kb.button(text="📜 History")
+    kb.button(text="❌ Cancel Task")
+    kb.adjust(2, 2, 2, 2)
+    return kb.as_markup(resize_keyboard=True)
+
 async def edit_admin_message(call: CallbackQuery, new_text: str):
     try:
         if call.message.photo:
@@ -187,56 +201,56 @@ async def start(message: Message, state: FSMContext):
     await ensure_user(message.from_user.id)
     
     text = (
-        '<tg-emoji emoji-id="5377548235709619284">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Commands:</b>\n'
-        '/balance - Check Wallet Balance<tg-emoji emoji-id="5215420556089776398">📋</tg-emoji>\n'
-        '/task - Get Random Task!<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>(50₹/ Gmail)\n'
-        '/sell - Sell Old Gmail Account<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>(30₹/ Gmail)\n'
-        '/mytask - Show Current Task<tg-emoji emoji-id="5445221832074483553">💼</tg-emoji>\n'
-        '/submit - Submit Completed Task<tg-emoji emoji-id="6235478849417647339">✅</tg-emoji>\n'
-        '/cancel_task - Cancel Current Task<tg-emoji emoji-id="5042112436648281096">❌</tg-emoji>\n'
-        '/withdraw - Request Withdrawal<tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
-        '/history - View History<tg-emoji emoji-id="5197288647275071607">🛡</tg-emoji>\n'
-        '/cancel - Cancel Current Operation<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji>\n'
+        '🔥 <b>Gmail EarneX Wallet Bot</b>\n\n'
+        '📋 <b>Use the buttons below or commands to operate the bot:</b>\n\n'
+        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail)\n'
+        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail)\n'
+        '• <b>Submit Task:</b> Submit proof after completing task\n'
+        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹\n'
     )
     
-    await message.answer(text, parse_mode=ParseMode.HTML)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
 
 @dp.message(Command("cancel"))
+@dp.message(F.text == "🚫 Cancel")
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Current operation cancelled.")
+    await message.answer("❌ Current operation cancelled.", reply_markup=get_main_menu_keyboard())
 
 # ============================================
 # BALANCE & HISTORY
 # ============================================
 
 @dp.message(Command("balance"))
+@dp.message(F.text == "💰 Balance")
 async def balance(message: Message):
     bal = await get_balance(message.from_user.id)
     await message.answer(
-        f'<tg-emoji emoji-id="5278467510604160626">💰</tg-emoji> Your Balance: ₹{bal:.2f}',
-        parse_mode=ParseMode.HTML
+        f'💰 Your Balance: ₹{bal:.2f}',
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
     )
 
 @dp.message(Command("history"))
+@dp.message(F.text == "📜 History")
 async def history(message: Message):
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", message.from_user.id)
     if not rows:
-        await message.answer("📭 No transactions found.")
+        await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
         return
     text = "📜 <b>Last Transactions</b>\n\n"
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    await message.answer(text, parse_mode=ParseMode.HTML)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
 
 # ============================================
 # SELL SYSTEM
 # ============================================
 
 @dp.message(Command("sell"))
+@dp.message(F.text == "😀 Sell Gmail")
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling)
@@ -249,7 +263,7 @@ async def handle_sell(message: Message, state: FSMContext):
         InlineKeyboardButton(text="❌ Decline", callback_data=f"selldecline:{message.from_user.id}")
     ]])
     await bot.send_message(ADMIN_ID, f"📦 <b>New Sell Request</b>\n\n👤 User: @{message.from_user.username}\n🆔 ID: {message.from_user.id}\n\n{message.text}", reply_markup=kb, parse_mode=ParseMode.HTML)
-    await message.answer("✅ Your item has been sent for admin review.")
+    await message.answer("✅ Your item has been sent for admin review.", reply_markup=get_main_menu_keyboard())
     await state.clear()
 
 @dp.callback_query(F.data.startswith("sellapprove:"))
@@ -315,6 +329,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 # ============================================
 
 @dp.message(Command("withdraw"))
+@dp.message(F.text == "🧾 Withdraw")
 async def withdraw(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.withdrawing)
@@ -348,7 +363,7 @@ async def handle_withdraw(message: Message, state: FSMContext):
     kb.button(text='❌ Reject', callback_data=f'reject:{withdraw_id}:{message.from_user.id}')
     await bot.send_message(ADMIN_ID, f'💰 WITHDRAWAL REQUEST #{withdraw_id}\n\n👤 @{message.from_user.username}\n🆔 {message.from_user.id}\n💵 Amount: ₹{amount:.2f}\n🏦 UPI: {upi}', reply_markup=kb.as_markup())
     await state.clear()
-    await message.answer('⏳ Withdrawal request sent to admin.')
+    await message.answer('⏳ Withdrawal request sent to admin.', reply_markup=get_main_menu_keyboard())
 
 @dp.callback_query(F.data.startswith("pay:"))
 async def pay_withdraw(call: CallbackQuery):
@@ -646,6 +661,7 @@ async def remove_task(message: Message, command: CommandObject):
 # ============================================
 
 @dp.message(Command('task'))
+@dp.message(F.text == "✍️ Get Task")
 async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
@@ -658,7 +674,7 @@ async def get_task(message: Message, state: FSMContext):
             # Check if task is currently under admin review
             task_status = await conn.fetchval('SELECT status FROM tasks WHERE id=$1', task_id)
             if task_status == 'pending_review':
-                await message.answer("⏳ Your task submission is currently under admin review. Please wait for the admin to check it.")
+                await message.answer("⏳ Your task submission is currently under admin review. Please wait for the admin to check it.", reply_markup=get_main_menu_keyboard())
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
@@ -666,7 +682,7 @@ async def get_task(message: Message, state: FSMContext):
             if remaining.total_seconds() > 0:
                 mins = int(remaining.total_seconds() // 60)
                 secs = int(remaining.total_seconds() % 60)
-                await message.answer(f'⚠️ You already have a task.\n⏰ Time remaining: {mins}m {secs}s\n\nUse /mytask or /submit')
+                await message.answer(f'⚠️ You already have a task.\n⏰ Time remaining: {mins}m {secs}s\n\nUse "💼 My Task" or "📤 Submit Task"', reply_markup=get_main_menu_keyboard())
                 return
             async with conn.transaction():
                 await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
@@ -674,7 +690,7 @@ async def get_task(message: Message, state: FSMContext):
 
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
-            await message.answer('📭 No tasks available right now.')
+            await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
             return
         
         task_id = task['id']
@@ -694,20 +710,21 @@ async def get_task(message: Message, state: FSMContext):
         username = title.replace("Login to ", "")
         password = "See Admin"
 
-    await message.answer(f"🎯 **Task #{task_id}**\n\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ You have ONLY 30 MINUTES to complete this task.", parse_mode=ParseMode.MARKDOWN)
+    await message.answer(f"🎯 **Task #{task_id}**\n\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ You have ONLY 30 MINUTES to complete this task.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
 
 @dp.message(Command('mytask'))
+@dp.message(F.text == "💼 My Task")
 async def my_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at FROM tasks t JOIN task_assignments a ON t.id = a.task_id WHERE a.user_id=$1', user_id)
     if not task:
-        await message.answer('📭 You have no assigned task.')
+        await message.answer('📭 You have no assigned task.', reply_markup=get_main_menu_keyboard())
         return
     
     if task['status'] == 'pending_review':
-        await message.answer("⏳ Your task has been submitted and is under admin review. Please wait for approval.")
+        await message.answer("⏳ Your task has been submitted and is under admin review. Please wait for approval.", reply_markup=get_main_menu_keyboard())
         return
 
     task_id = task['id']
@@ -720,7 +737,7 @@ async def my_task(message: Message, state: FSMContext):
     remaining = expire_time - datetime.utcnow()
     total_seconds = int(remaining.total_seconds())
     if total_seconds <= 0:
-        await message.answer('⏰ Your task has expired.')
+        await message.answer('⏰ Your task has expired.', reply_markup=get_main_menu_keyboard())
         return
     mins = total_seconds // 60
     secs = total_seconds % 60
@@ -731,43 +748,45 @@ async def my_task(message: Message, state: FSMContext):
     except:
         username = title.replace("Login to ", "")
         password = "See Admin"
-    await message.answer(f"🎯 **Your Current Task**\n\n🆔 #{task_id}\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ Time Remaining: {mins}m {secs}s", parse_mode=ParseMode.MARKDOWN)
+    await message.answer(f"🎯 **Your Current Task**\n\n🆔 #{task_id}\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ Time Remaining: {mins}m {secs}s", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
 
 @dp.message(Command("cancel_task"))
+@dp.message(F.text == "❌ Cancel Task")
 async def cancel_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
         if not row:
-            await message.answer("❌ You don't have any active task to cancel.")
+            await message.answer("❌ You don't have any active task to cancel.", reply_markup=get_main_menu_keyboard())
             return
         
         if row['status'] == 'pending_review':
-            await message.answer("❌ You cannot cancel a task that has already been submitted for admin review.")
+            await message.answer("❌ You cannot cancel a task that has already been submitted for admin review.", reply_markup=get_main_menu_keyboard())
             return
 
         task_id = row['task_id']
         async with conn.transaction():
             await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
-    await message.answer(f"✅ Task #{task_id} has been cancelled and returned to the pool.")
+    await message.answer(f"✅ Task #{task_id} has been cancelled and returned to the pool.", reply_markup=get_main_menu_keyboard())
 
 # ============================================
 # SUBMIT TASK
 # ============================================
 
 @dp.message(Command('submit'))
+@dp.message(F.text == "📤 Submit Task")
 async def submit_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
     if not row:
-        await message.answer('❌ You do not have any active task.')
+        await message.answer('❌ You do not have any active task.', reply_markup=get_main_menu_keyboard())
         return
     if row['status'] == 'pending_review':
-        await message.answer('⏳ You have already submitted this task. Please wait for admin review.')
+        await message.answer('⏳ You have already submitted this task. Please wait for admin review.', reply_markup=get_main_menu_keyboard())
         return
     await state.set_state(UserState.submitting_task)
     await message.answer('📤 Send screenshot or proof of completed task.')
@@ -779,7 +798,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
     if not task:
         await state.clear()
-        await message.answer('❌ No active task found.')
+        await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
         return
     
     task_id = task['id']
@@ -798,7 +817,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'📤 **Task Submission**\n\n👤 User: @{message.from_user.username}\n🆔 Task #{task_id}\n📌 {title}\n💰 Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
     else:
         await bot.send_message(ADMIN_ID, f'📤 **Task Submission**\n\n👤 User: @{message.from_user.username}\n🆔 Task #{task_id}\n📌 {title}\n💰 Reward: ₹{reward}\n\n📝 Proof: {message.text}', reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await message.answer('📤 Submission sent for admin review.')
+    await message.answer('📤 Submission sent for admin review.', reply_markup=get_main_menu_keyboard())
     await state.clear()
 
 @dp.callback_query(F.data.startswith("taskapprove:"))
@@ -909,7 +928,7 @@ async def auto_expire_tasks():
                             await conn.execute('DELETE FROM task_assignments WHERE task_id=$1', task_id)
                             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
                         try:
-                            await bot.send_message(user_id, f'⏰ Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse /task to get a new task.')
+                            await bot.send_message(user_id, f'⏰ Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "✍️ Get Task" to get a new task.', reply_markup=get_main_menu_keyboard())
                         except:
                             pass
         except Exception as e:
