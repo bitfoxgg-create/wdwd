@@ -171,9 +171,10 @@ async def ban_check_callback_middleware(handler, event: CallbackQuery, data):
 async def start(message: Message, state: FSMContext):
     await state.clear()
     await ensure_user(message.from_user.id)
+    
     text = (
-        "🔥Gmail EarneX Wallet Bot\n\n"
-        "📋Commands:\n"
+        '<tg-emoji custom_emoji_id="5877680341057015789">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
+        "📋 <b>Commands:</b>\n"
         "/balance - Check balance\n"
         "/sell - Sell old Gmail account\n"
         "/task - Get random task\n"
@@ -184,7 +185,8 @@ async def start(message: Message, state: FSMContext):
         "/history - Transaction history\n"
         "/cancel - Cancel current operation"
     )
-    await message.answer(text, entities=[MessageEntity(type='custom_emoji', offset=0, length=2, custom_emoji_id='5877680341057015789')])
+    
+    await message.answer(text, parse_mode=ParseMode.HTML)
 
 @dp.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext):
