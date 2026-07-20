@@ -154,7 +154,7 @@ def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="✍️ Get Task")
     kb.button(text="💰 Balance")
-    kb.button(text="😀 Sell Gmail")
+    kb.button(text="📨 Sell Gmail")
     kb.button(text="📜 History")
     kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
