@@ -53,7 +53,7 @@ def run_flask():
 
 class UserState(StatesGroup):
     selling = State()
-    withdrawing = State()
+    setting_upi = State()
     submitting_task = State()
 
 class AdminState(StatesGroup):
@@ -79,9 +79,13 @@ async def init_db():
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY, 
-                balance DOUBLE PRECISION DEFAULT 0
+                balance DOUBLE PRECISION DEFAULT 0,
+                upi TEXT DEFAULT 'None'
             )
         ''')
+        # Ensure column exists for older table versions
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
+
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS banned_users (
                 user_id BIGINT PRIMARY KEY
@@ -130,13 +134,16 @@ async def init_db():
 
 async def ensure_user(user_id: int):
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO users (user_id, balance) VALUES ($1, 0) ON CONFLICT (user_id) DO NOTHING", user_id)
+        await conn.execute("INSERT INTO users (user_id, balance, upi) VALUES ($1, 0, 'None') ON CONFLICT (user_id) DO NOTHING", user_id)
 
-async def get_balance(user_id: int) -> float:
+async def get_user_data(user_id: int):
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT balance FROM users WHERE user_id=$1", user_id)
-        return row['balance'] if row else 0.0
+        return await conn.fetchrow("SELECT balance, upi FROM users WHERE user_id=$1", user_id)
+
+async def get_balance(user_id: int) -> float:
+    data = await get_user_data(user_id)
+    return data['balance'] if data else 0.0
 
 async def is_banned(user_id: int) -> bool:
     async with db_pool.acquire() as conn:
@@ -148,10 +155,17 @@ def get_main_menu_keyboard():
     kb.button(text="✍️ Get Task")
     kb.button(text="💰 Balance")
     kb.button(text="😀 Sell Gmail")
-    kb.button(text="🧾 Withdraw")
     kb.button(text="📜 History")
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
+
+def get_balance_inline_keyboard(upi_set: bool):
+    kb = InlineKeyboardBuilder()
+    link_text = "🔗 Change UPI" if upi_set else "🔗 Link UPI"
+    kb.button(text=link_text, callback_data="link_upi")
+    kb.button(text="💸 Withdraw", callback_data="inline_withdraw")
+    kb.adjust(1, 1)
+    return kb.as_markup()
 
 def get_task_action_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[
@@ -208,7 +222,7 @@ async def start(message: Message, state: FSMContext):
         '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
         '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
         '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
-        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
+        '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5278467510604160626">💰</tg-emoji>\n'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -220,18 +234,87 @@ async def cancel(message: Message, state: FSMContext):
     await message.answer('<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard())
 
 # ============================================
-# BALANCE & HISTORY
+# BALANCE & LINK UPI / WITHDRAW SYSTEM
 # ============================================
 
 @dp.message(Command("balance"))
 @dp.message(F.text == "💰 Balance")
-async def balance(message: Message):
-    bal = await get_balance(message.from_user.id)
-    await message.answer(
-        f'<tg-emoji emoji-id="5278467510604160626">💰</tg-emoji> Your Balance: ₹{bal:.2f}',
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
+async def balance(message: Message, state: FSMContext):
+    await state.clear()
+    user_data = await get_user_data(message.from_user.id)
+    bal = user_data['balance'] if user_data else 0.0
+    upi = user_data['upi'] if user_data and user_data['upi'] else "None"
+
+    upi_set = upi != "None" and upi != ""
+    
+    text = (
+        f"💳 <b>Balance: ₹{bal:.2f}</b>\n"
+        f"<b>UPI:</b> {upi}"
     )
+    
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+
+@dp.callback_query(F.data == "link_upi")
+async def start_link_upi(call: CallbackQuery, state: FSMContext):
+    await state.set_state(UserState.setting_upi)
+    await call.message.answer("🔗 Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>", parse_mode=ParseMode.HTML)
+    await call.answer()
+
+@dp.message(UserState.setting_upi, F.text, ~F.text.startswith("/"))
+async def process_link_upi(message: Message, state: FSMContext):
+    upi_input = message.text.strip()
+    if "@" not in upi_input or len(upi_input) < 5:
+        await message.answer("❌ Invalid UPI ID format. Please send a valid UPI ID (e.g. `yourname@upi`).", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET upi=$1 WHERE user_id=$2", upi_input, message.from_user.id)
+
+    await message.answer(f"✅ Your UPI ID has been linked to: `{upi_input}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
+    await state.clear()
+
+@dp.callback_query(F.data == "inline_withdraw")
+async def inline_withdraw_handler(call: CallbackQuery):
+    user_data = await get_user_data(call.from_user.id)
+    bal = user_data['balance'] if user_data else 0.0
+    upi = user_data['upi'] if user_data else "None"
+
+    if upi == "None" or not upi:
+        await call.answer("❌ Please link your UPI ID first before withdrawing!", show_alert=True)
+        return
+
+    MIN_WITHDRAW = 150.0
+    if bal < MIN_WITHDRAW:
+        await call.answer(f"❌ Minimum withdrawal is ₹{MIN_WITHDRAW:.0f}. Current Balance: ₹{bal:.2f}", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        withdraw_id = await conn.fetchval(
+            'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
+            call.from_user.id, bal, upi
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text='💸 Pay', callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}')
+    kb.button(text='❌ Reject', callback_data=f'reject:{withdraw_id}:{call.from_user.id}')
+    
+    await bot.send_message(
+        ADMIN_ID,
+        f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+        f'👤 @{call.from_user.username}\n'
+        f'🆔 <code>{call.from_user.id}</code>\n'
+        f'💵 Amount: ₹{bal:.2f}\n'
+        f'🏦 UPI: <code>{upi}</code>',
+        reply_markup=kb.as_markup(),
+        parse_mode=ParseMode.HTML
+    )
+
+    await call.message.edit_text(f"⏳ Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>", parse_mode=ParseMode.HTML)
+    await call.answer()
+
+# ============================================
+# HISTORY
+# ============================================
 
 @dp.message(Command("history"))
 @dp.message(F.text == "📜 History")
@@ -327,45 +410,8 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
     await state.clear()
 
 # ============================================
-# WITHDRAWAL
+# WITHDRAWAL CALLBACKS (ADMIN SIDE)
 # ============================================
-
-@dp.message(Command("withdraw"))
-@dp.message(F.text == "🧾 Withdraw")
-async def withdraw(message: Message, state: FSMContext):
-    await state.clear()
-    await state.set_state(UserState.withdrawing)
-    await message.answer('💸 Withdrawal Request\n\n📌 Minimum Withdrawal: ₹150\n\nSend in this format:\n\nAmount: 150\nUPI: yourupi@upi')
-
-@dp.message(UserState.withdrawing, F.text, ~F.text.startswith("/"))
-async def handle_withdraw(message: Message, state: FSMContext):
-    try:
-        lines = message.text.split('\n')
-        amount = float(lines[0].lower().split('amount:')[1].strip())
-        upi = lines[1].lower().split('upi:')[1].strip()
-    except:
-        await message.answer('❌ Invalid format.\n\nUse this format:\nAmount: 150\nUPI: yourupi@upi')
-        return
-
-    balance = await get_balance(message.from_user.id)
-
-    MIN_WITHDRAW = 150
-    if amount < MIN_WITHDRAW:
-        await message.answer(f'❌ Minimum withdrawal is ₹{MIN_WITHDRAW}\nPlease withdraw ₹{MIN_WITHDRAW} or more.')
-        return
-    if amount > balance:
-        await message.answer(f'❌ Insufficient balance.\nYour balance: ₹{balance:.2f}')
-        return
-
-    async with db_pool.acquire() as conn:
-        withdraw_id = await conn.fetchval('INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id', message.from_user.id, amount, upi)
-
-    kb = InlineKeyboardBuilder()
-    kb.button(text='💸 Pay', callback_data=f'pay:{withdraw_id}:{message.from_user.id}:{amount}')
-    kb.button(text='❌ Reject', callback_data=f'reject:{withdraw_id}:{message.from_user.id}')
-    await bot.send_message(ADMIN_ID, f'💰 WITHDRAWAL REQUEST #{withdraw_id}\n\n👤 @{message.from_user.username}\n🆔 {message.from_user.id}\n💵 Amount: ₹{amount:.2f}\n🏦 UPI: {upi}', reply_markup=kb.as_markup())
-    await state.clear()
-    await message.answer('⏳ Withdrawal request sent to admin.', reply_markup=get_main_menu_keyboard())
 
 @dp.callback_query(F.data.startswith("pay:"))
 async def pay_withdraw(call: CallbackQuery):
@@ -466,10 +512,12 @@ async def check_user_balance(message: Message, command: CommandObject):
         return
     try:
         target_id = int(command.args.strip())
-        bal = await get_balance(target_id)
+        user_data = await get_user_data(target_id)
+        bal = user_data['balance'] if user_data else 0.0
+        upi = user_data['upi'] if user_data else "None"
         banned = await is_banned(target_id)
         status = "🔴 Banned" if banned else "🟢 Active"
-        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN)
+        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n🏦 **UPI:** `{upi}`\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN)
     except ValueError:
         await message.answer("❌ Invalid User ID. Please provide a valid numeric ID.")
 
@@ -753,7 +801,6 @@ async def get_task(message: Message, state: FSMContext):
         reply_markup=get_task_action_keyboard()
     )
 
-
 # ============================================
 # USER INLINE SUBMIT & CANCEL SYSTEM
 # ============================================
@@ -801,7 +848,6 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(f"✅ Task #{task_id} has been cancelled and returned to the pool.")
     await call.answer()
 
-
 # Fallbacks for commands if users manually type them out 
 @dp.message(Command('submit'))
 async def fallback_submit(message: Message, state: FSMContext):
@@ -836,7 +882,6 @@ async def fallback_cancel(message: Message, state: FSMContext):
             await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
     await message.answer(f"✅ Task #{task_id} has been cancelled and returned to the pool.", reply_markup=get_main_menu_keyboard())
-
 
 # ============================================
 # SUBMISSION PHOTO/TEXT HANDLER
