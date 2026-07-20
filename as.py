@@ -350,7 +350,7 @@ async def add_task(message: Message, command: CommandObject):
             return
         username = args[0]
         password = args[1]
-        default_reward = 30.0 
+        default_reward = 50.0 
         title = f"Login to {username}"
         details = f"Email: {username} | Pass: {password}"
         async with aiosqlite.connect("bot.db") as db:
