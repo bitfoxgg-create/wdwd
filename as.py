@@ -185,25 +185,12 @@ async def start(message: Message, state: FSMContext):
         "/cancel - Cancel current operation"
     )
     
-    await message.answer(
-        text,
-        entities=[
-            # 🔥 animated
-            MessageEntity(
-                type='custom_emoji',
-                offset=0,
-                length=2,
-                custom_emoji_id='4956304066725545076'
-            ),
-            # 📋 animated
-            MessageEntity(
-                type='custom_emoji',
-                offset=28,
-                length=2,
-                custom_emoji_id='5287684458881756303'
-            ),
-        ]
-    )
+    entities = [
+        MessageEntity(type="custom_emoji", offset=0, length=2, custom_emoji_id="5377548235709619284"),
+        MessageEntity(type="custom_emoji", offset=28, length=2, custom_emoji_id="5287684458881756303"),
+    ]
+    
+    await message.answer(text, entities=entities)
 
 @dp.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext):
