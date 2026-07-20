@@ -204,6 +204,7 @@ async def balance(message: Message):
         f'<tg-emoji emoji-id="5278467510604160626">💰</tg-emoji> Your Balance: ₹{bal:.2f}',
         parse_mode=ParseMode.HTML
     )
+
 @dp.message(Command("history"))
 async def history(message: Message):
     async with db_pool.acquire() as conn:
@@ -580,6 +581,13 @@ async def get_task(message: Message, state: FSMContext):
         if existing:
             task_id = existing['task_id']
             assigned_time = existing['assigned_at']
+            
+            # Check if task is currently under admin review
+            task_status = await conn.fetchval('SELECT status FROM tasks WHERE id=$1', task_id)
+            if task_status == 'pending_review':
+                await message.answer("⏳ Your task submission is currently under admin review. Please wait for the admin to check it.")
+                return
+
             expire_time = assigned_time + timedelta(minutes=30)
             remaining = expire_time - datetime.utcnow()
             if remaining.total_seconds() > 0:
@@ -620,11 +628,15 @@ async def my_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward, a.assigned_at FROM tasks t JOIN task_assignments a ON t.id = a.task_id WHERE a.user_id=$1', user_id)
+        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at FROM tasks t JOIN task_assignments a ON t.id = a.task_id WHERE a.user_id=$1', user_id)
     if not task:
         await message.answer('📭 You have no assigned task.')
         return
     
+    if task['status'] == 'pending_review':
+        await message.answer("⏳ Your task has been submitted and is under admin review. Please wait for approval.")
+        return
+
     task_id = task['id']
     title = task['title']
     details = task['details']
@@ -653,10 +665,15 @@ async def cancel_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT task_id FROM task_assignments WHERE user_id=$1', user_id)
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
         if not row:
             await message.answer("❌ You don't have any active task to cancel.")
             return
+        
+        if row['status'] == 'pending_review':
+            await message.answer("❌ You cannot cancel a task that has already been submitted for admin review.")
+            return
+
         task_id = row['task_id']
         async with conn.transaction():
             await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
@@ -672,9 +689,12 @@ async def submit_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT task_id FROM task_assignments WHERE user_id=$1', user_id)
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
     if not row:
         await message.answer('❌ You do not have any active task.')
+        return
+    if row['status'] == 'pending_review':
+        await message.answer('⏳ You have already submitted this task. Please wait for admin review.')
         return
     await state.set_state(UserState.submitting_task)
     await message.answer('📤 Send screenshot or proof of completed task.')
@@ -693,6 +713,10 @@ async def handle_task_submission(message: Message, state: FSMContext):
     title = task['title']
     reward = task['reward']
     
+    # Mark task as pending_review so auto_expire won't expire it or release it back to pool
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
+
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text='✅ Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}'),
         InlineKeyboardButton(text='❌ Decline', callback_data=f'taskdecline:{task_id}:{user_id}')
@@ -715,6 +739,7 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"Task #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+            # Mark as completed so it NEVER goes back to the pool
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
     await bot.send_message(user_id, f"🎉 Task approved!\n+₹{reward} added to your balance.")
     await call.message.edit_text("✅ Task approved and balance credited.")
@@ -727,9 +752,10 @@ async def decline_task(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+            # Reset status back to available so it goes back into the pool
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
     await bot.send_message(user_id, "❌ Task submission declined. The task has been returned to the pool.")
-    await call.message.edit_text("❌ Task declined and unlocked.")
+    await call.message.edit_text("❌ Task declined and returned to pool.")
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
@@ -739,7 +765,13 @@ async def auto_expire_tasks():
     while True:
         try:
             async with db_pool.acquire() as conn:
-                rows = await conn.fetch('SELECT task_id, user_id, assigned_at FROM task_assignments')
+                # Exclude tasks that are pending admin review
+                rows = await conn.fetch('''
+                    SELECT ta.task_id, ta.user_id, ta.assigned_at 
+                    FROM task_assignments ta
+                    JOIN tasks t ON ta.task_id = t.id
+                    WHERE t.status != 'pending_review'
+                ''')
                 for r in rows:
                     task_id = r['task_id']
                     user_id = r['user_id']
