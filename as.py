@@ -200,8 +200,10 @@ async def cancel(message: Message, state: FSMContext):
 @dp.message(Command("balance"))
 async def balance(message: Message):
     bal = await get_balance(message.from_user.id)
-    await message.answer(f'<tg-emoji emoji-id="5278467510604160626">💰</tg-emoji>Your Balance: ₹{bal:.2f}')
-
+    await message.answer(
+        f'<tg-emoji custom_emoji_id="5278467510604160626">💰</tg-emoji> Your Balance: ₹{bal:.2f}',
+        parse_mode=ParseMode.HTML
+    )
 @dp.message(Command("history"))
 async def history(message: Message):
     async with db_pool.acquire() as conn:
