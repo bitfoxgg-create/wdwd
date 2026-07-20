@@ -175,8 +175,8 @@ async def start(message: Message, state: FSMContext):
     text = (
         '<tg-emoji emoji-id="5377548235709619284">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
         '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Commands:</b>\n'
-        '/balance - Check Wallet Balance <tg-emoji emoji-id="5215420556089776398">📋</tg-emoji>\n'
-        "/sell - Sell old Gmail account\n"
+        '/balance - Check Wallet Balance<tg-emoji emoji-id="5215420556089776398">📋</tg-emoji>\n'
+        '/sell - Sell Old Gmail Account<tg-emoji emoji-id="5215420556089776398">📋</tg-emoji>\n'
         "/task - Get random task\n"
         "/mytask - Show current task\n"
         "/submit - Submit completed task\n"
