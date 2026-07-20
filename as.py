@@ -201,12 +201,12 @@ async def start(message: Message, state: FSMContext):
     await ensure_user(message.from_user.id)
     
     text = (
-        '🔥 <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '📋 <b>Use the buttons below or commands to operate the bot:</b>\n\n'
-        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail)\n'
-        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail)\n'
-        '• <b>Submit Task:</b> Submit proof after completing task\n'
-        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹\n'
+        '<tg-emoji emoji-id="5377548235709619284">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
+        '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below or commands to operate the bot:</b>\n\n'
+        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
+        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
+        '• <b>Submit Task:</b> Submit proof after completing task <tg-emoji emoji-id="6235478849417647339">✅</tg-emoji>\n'
+        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -215,7 +215,7 @@ async def start(message: Message, state: FSMContext):
 @dp.message(F.text == "🚫 Cancel")
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("❌ Current operation cancelled.", reply_markup=get_main_menu_keyboard())
+    await message.answer('<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard())
 
 # ============================================
 # BALANCE & HISTORY
@@ -226,7 +226,7 @@ async def cancel(message: Message, state: FSMContext):
 async def balance(message: Message):
     bal = await get_balance(message.from_user.id)
     await message.answer(
-        f'💰 Your Balance: ₹{bal:.2f}',
+        f'<tg-emoji emoji-id="5278467510604160626">💰</tg-emoji> Your Balance: ₹{bal:.2f}',
         parse_mode=ParseMode.HTML,
         reply_markup=get_main_menu_keyboard()
     )
@@ -239,7 +239,7 @@ async def history(message: Message):
     if not rows:
         await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
         return
-    text = "📜 <b>Last Transactions</b>\n\n"
+    text = '<tg-emoji emoji-id="5197288647275071607">📜</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
