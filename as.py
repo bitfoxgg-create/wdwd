@@ -488,18 +488,18 @@ async def add_task(message: Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID:
         return
     if not command.args:
-        await message.answer("❌ Missing username!\n\nUsage: `/addtask john`", parse_mode=ParseMode.MARKDOWN)
+        await message.answer("❌ Missing username!\n\nUsage: `/addtask philibertg1286`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
         username_input = command.args.strip()
         
-        # If user provides just 'john', turn it into 'john@gmail.com'
+        # If no '@' is provided, append '@gmail.com' automatically
         if "@" not in username_input:
             username = f"{username_input}@gmail.com"
         else:
             username = username_input
 
-        # Default password
+        # Default fixed password and default reward
         password = "TaskVerse@#"
         default_reward = 50.0 
         
