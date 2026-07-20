@@ -177,13 +177,13 @@ async def start(message: Message, state: FSMContext):
         '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Commands:</b>\n'
         '/balance - Check Wallet Balance<tg-emoji emoji-id="5215420556089776398">📋</tg-emoji>\n'
         '/sell - Sell Old Gmail Account<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
-        "/task - Get random task\n"
-        "/mytask - Show current task\n"
-        "/submit - Submit completed task\n"
-        "/cancel_task - Cancel current task\n"
-        "/withdraw - Request withdrawal\n"
-        "/history - Transaction history\n"
-        "/cancel - Cancel current operation"
+        '/task - Get Random Task!<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
+        '/mytask - Show Current Task<tg-emoji emoji-id="5445221832074483553">💼</tg-emoji>\n'
+        '/submit - Submit Completed Task<tg-emoji emoji-id="6235478849417647339">✅</tg-emoji>\n'
+        '/cancel_task - Cancel Current Task<tg-emoji emoji-id="5042112436648281096">❌</tg-emoji>\n'
+        '/withdraw - Request Withdrawal<tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
+        '/history - View History<tg-emoji emoji-id="5197288647275071607">🛡</tg-emoji>\n'
+        '/cancel - Cancel Current Operation<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji>\n'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML)
