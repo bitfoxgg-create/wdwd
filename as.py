@@ -30,7 +30,6 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Connection pool holder
 db_pool = None
 
 # ============================================
@@ -61,12 +60,14 @@ class UserState(StatesGroup):
 
 async def init_db():
     global db_pool
-    # Supabase uses postgresql://, asyncpg requires standard URL format
     url = DATABASE_URL
-    if url and url.startswith("postgres://"):
+    if not url:
+        raise ValueError("DATABASE_URL environment variable is missing!")
+        
+    if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
         
-    db_pool = await asyncpg.create_pool(dsn=url)
+    db_pool = await asyncpg.create_pool(dsn=url, ssl='require')
     
     async with db_pool.acquire() as conn:
         await conn.execute('''
@@ -493,13 +494,13 @@ async def add_task(message: Message, command: CommandObject):
     try:
         username_input = command.args.strip()
         
-        # If no '@' is provided, append '@gmail.com' automatically
+        # Append @gmail.com automatically if not provided
         if "@" not in username_input:
             username = f"{username_input}@gmail.com"
         else:
             username = username_input
 
-        # Default fixed password and default reward
+        # Default password and reward
         password = "TaskVerse@#"
         default_reward = 50.0 
         
