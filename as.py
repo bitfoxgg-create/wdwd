@@ -137,6 +137,16 @@ async def is_banned(user_id: int) -> bool:
         row = await conn.fetchrow("SELECT 1 FROM banned_users WHERE user_id=$1", user_id)
         return row is not None
 
+# Helper to edit message content safely whether it's text or photo
+async def edit_admin_message(call: CallbackQuery, new_text: str):
+    try:
+        if call.message.photo:
+            await call.message.edit_caption(caption=new_text, reply_markup=None)
+        else:
+            await call.message.edit_text(text=new_text, reply_markup=None)
+    except Exception as e:
+        print(f"Error editing admin message: {e}")
+
 # ============================================
 # GLOBAL BAN MIDDLEWARES
 # ============================================
@@ -243,19 +253,31 @@ async def approve_sell(call: CallbackQuery):
     _, user_id, amount = call.data.split(":")
     user_id = int(user_id)
     amount = float(amount)
+    
+    # Prevent double clicks by removing buttons immediately
+    await edit_admin_message(call, "✅ Processing Sell Approval...")
+    
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, "Gmail sell approved")
-    await bot.send_message(user_id, f"🎉 Sell approved!\n+₹{amount} added to your balance.")
-    await call.message.edit_text("✅ Sell approved and balance credited.")
+    
+    try:
+        await bot.send_message(user_id, f"🎉 Sell approved!\n+₹{amount} added to your balance.")
+    except:
+        pass
+    await edit_admin_message(call, "✅ Sell approved and balance credited.")
 
 @dp.callback_query(F.data.startswith("selldecline:"))
 async def decline_sell(call: CallbackQuery):
     _, user_id = call.data.split(":")
     user_id = int(user_id)
-    await bot.send_message(user_id, "❌ Your sell request was declined.")
-    await call.message.edit_text("❌ Sell request declined.")
+    
+    await edit_admin_message(call, "❌ Sell request declined.")
+    try:
+        await bot.send_message(user_id, "❌ Your sell request was declined.")
+    except:
+        pass
 
 # ============================================
 # WITHDRAWAL
@@ -303,23 +325,43 @@ async def pay_withdraw(call: CallbackQuery):
     withdrawal_id = int(withdrawal_id)
     user_id = int(user_id)
     amount = float(amount)
+    
     async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if status != 'pending':
+            await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
+            return
+
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", amount, user_id)
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
-    await bot.send_message(user_id, f"🎉 Withdrawal of ₹{amount} has been paid.")
-    await call.message.edit_text("✅ Withdrawal marked as paid.")
+            
+    await edit_admin_message(call, "✅ Withdrawal marked as paid.")
+    try:
+        await bot.send_message(user_id, f"🎉 Withdrawal of ₹{amount} has been paid.")
+    except:
+        pass
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject_withdraw(call: CallbackQuery):
     _, withdrawal_id, user_id = call.data.split(":")
     withdrawal_id = int(withdrawal_id)
     user_id = int(user_id)
+    
     async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if status != 'pending':
+            await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
+            return
+
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
-    await bot.send_message(user_id, "❌ Your withdrawal request was rejected.")
-    await call.message.edit_text("❌ Withdrawal rejected.")
+        
+    await edit_admin_message(call, "❌ Withdrawal rejected.")
+    try:
+        await bot.send_message(user_id, "❌ Your withdrawal request was rejected.")
+    except:
+        pass
 
 # ============================================
 # ADMIN CONTROLS
@@ -734,28 +776,50 @@ async def approve_task(call: CallbackQuery):
     task_id = int(task_id)
     user_id = int(user_id)
     reward = float(reward)
+    
     async with db_pool.acquire() as conn:
+        # Check task status to prevent double processing
+        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
+        if current_status != 'pending_review':
+            await call.answer("⚠️ Task has already been processed!", show_alert=True)
+            return
+
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"Task #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             # Mark as completed so it NEVER goes back to the pool
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
-    await bot.send_message(user_id, f"🎉 Task approved!\n+₹{reward} added to your balance.")
-    await call.message.edit_text("✅ Task approved and balance credited.")
+            
+    await edit_admin_message(call, "✅ Task approved and balance credited.")
+    try:
+        await bot.send_message(user_id, f"🎉 Task approved!\n+₹{reward} added to your balance.")
+    except:
+        pass
 
 @dp.callback_query(F.data.startswith("taskdecline:"))
 async def decline_task(call: CallbackQuery):
     _, task_id, user_id = call.data.split(":")
     task_id = int(task_id)
     user_id = int(user_id)
+    
     async with db_pool.acquire() as conn:
+        # Check task status to prevent double processing
+        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
+        if current_status != 'pending_review':
+            await call.answer("⚠️ Task has already been processed!", show_alert=True)
+            return
+
         async with conn.transaction():
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             # Reset status back to available so it goes back into the pool
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
-    await bot.send_message(user_id, "❌ Task submission declined. The task has been returned to the pool.")
-    await call.message.edit_text("❌ Task declined and returned to pool.")
+            
+    await edit_admin_message(call, "❌ Task declined and returned to pool.")
+    try:
+        await bot.send_message(user_id, "❌ Task submission declined. The task has been returned to the pool.")
+    except:
+        pass
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
