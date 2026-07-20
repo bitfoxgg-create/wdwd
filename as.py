@@ -145,7 +145,6 @@ async def is_banned(user_id: int) -> bool:
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    # Removed My Task, Submit Task, and Cancel Task. They are now inline inside "Get Task".
     kb.button(text="✍️ Get Task")
     kb.button(text="💰 Balance")
     kb.button(text="😀 Sell Gmail")
@@ -153,6 +152,12 @@ def get_main_menu_keyboard():
     kb.button(text="📜 History")
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_task_action_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📤 Submit", callback_data="user_submit_task"),
+        InlineKeyboardButton(text="❌ Cancel", callback_data="user_cancel_task")
+    ]])
 
 async def edit_admin_message(call: CallbackQuery, new_text: str):
     try:
@@ -203,8 +208,7 @@ async def start(message: Message, state: FSMContext):
         '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
         '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
         '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
-        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n\n'
-        '<i>(Note: Check your active tasks by clicking "Get Task" again to submit or cancel them.)</i>'
+        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -700,12 +704,6 @@ async def get_task(message: Message, state: FSMContext):
                     username = existing['title'].replace("Login to ", "")
                     password = "See Admin"
 
-                # Provide Submit and Cancel as inline buttons here instead of separate menu items
-                inline_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="📤 Submit", callback_data="user_submit_task"),
-                    InlineKeyboardButton(text="❌ Cancel", callback_data="user_cancel_task")
-                ]])
-
                 await message.answer(
                     f"⚠️ **You already have an active task.**\n\n"
                     f"🎯 **Your Current Task**\n\n"
@@ -714,7 +712,7 @@ async def get_task(message: Message, state: FSMContext):
                     f"💰 **Reward:** ₹{existing['reward']}\n\n"
                     f"⏰ Time Remaining: {mins}m {secs}s", 
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=inline_kb
+                    reply_markup=get_task_action_keyboard()
                 )
                 return
             else:
@@ -746,7 +744,14 @@ async def get_task(message: Message, state: FSMContext):
         username = title.replace("Login to ", "")
         password = "See Admin"
 
-    await message.answer(f"🎯 **Task #{task_id}**\n\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ You have ONLY 30 MINUTES to complete this task.\n\n*(Click 'Get Task' again to Submit or Cancel)*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
+    await message.answer(
+        f"🎯 **Task #{task_id}**\n\n"
+        f"📝 **Email:** {username} | **Password:** `{password}`\n"
+        f"💰 **Reward:** ₹{reward}\n\n"
+        f"⏰ You have ONLY 30 MINUTES to complete this task.", 
+        parse_mode=ParseMode.MARKDOWN, 
+        reply_markup=get_task_action_keyboard()
+    )
 
 
 # ============================================
