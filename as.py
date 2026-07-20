@@ -173,7 +173,7 @@ async def start(message: Message, state: FSMContext):
     await ensure_user(message.from_user.id)
     
     text = (
-        '<tg-emoji custom_emoji_id="5877680341057015789">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
+        '<tg-emoji emoji-id="5877680341057015789">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
         "📋 <b>Commands:</b>\n"
         "/balance - Check balance\n"
         "/sell - Sell old Gmail account\n"
