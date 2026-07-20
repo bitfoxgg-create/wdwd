@@ -152,10 +152,15 @@ async def is_banned(user_id: int) -> bool:
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    kb.button(text="✍️ Get Task")
-    kb.button(text="💰 Balance")
-    kb.button(text="📨 Sell Gmail")
-    kb.button(text="📜 History")
+    
+    # Row 1: Green buttons
+    kb.button(text="✍️ Get Task", style="success")
+    kb.button(text="😀 Sell Gmail", style="success")
+    
+    # Row 2: Blue buttons
+    kb.button(text="💰 Balance", style="primary")
+    kb.button(text="📜 History", style="primary")
+    
     kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
 
