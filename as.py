@@ -145,15 +145,13 @@ async def is_banned(user_id: int) -> bool:
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
+    # Removed My Task, Submit Task, and Cancel Task. They are now inline inside "Get Task".
     kb.button(text="✍️ Get Task")
-    kb.button(text="💼 My Task")
-    kb.button(text="📤 Submit Task")
     kb.button(text="💰 Balance")
     kb.button(text="😀 Sell Gmail")
     kb.button(text="🧾 Withdraw")
     kb.button(text="📜 History")
-    kb.button(text="❌ Cancel Task")
-    kb.adjust(2, 2, 2, 2)
+    kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 async def edit_admin_message(call: CallbackQuery, new_text: str):
@@ -202,11 +200,11 @@ async def start(message: Message, state: FSMContext):
     
     text = (
         '<tg-emoji emoji-id="5377548235709619284">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below or commands to operate the bot:</b>\n\n'
+        '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
         '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
         '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
-        '• <b>Submit Task:</b> Submit proof after completing task <tg-emoji emoji-id="6235478849417647339">✅</tg-emoji>\n'
-        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n'
+        '• <b>Withdraw:</b> Request minimum withdrawal of 150₹ <tg-emoji emoji-id="5444856076954520455">🧾</tg-emoji>\n\n'
+        '<i>(Note: Check your active tasks by clicking "Get Task" again to submit or cancel them.)</i>'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -666,28 +664,66 @@ async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        existing = await conn.fetchrow('SELECT task_id, assigned_at FROM task_assignments WHERE user_id=$1', user_id)
+        
+        # Check for existing assigned task, bringing in task details
+        existing = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at 
+            FROM task_assignments a
+            JOIN tasks t ON a.task_id = t.id
+            WHERE a.user_id=$1
+        ''', user_id)
+        
         if existing:
-            task_id = existing['task_id']
+            task_id = existing['id']
             assigned_time = existing['assigned_at']
+            task_status = existing['status']
             
             # Check if task is currently under admin review
-            task_status = await conn.fetchval('SELECT status FROM tasks WHERE id=$1', task_id)
             if task_status == 'pending_review':
                 await message.answer("⏳ Your task submission is currently under admin review. Please wait for the admin to check it.", reply_markup=get_main_menu_keyboard())
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
             remaining = expire_time - datetime.utcnow()
-            if remaining.total_seconds() > 0:
-                mins = int(remaining.total_seconds() // 60)
-                secs = int(remaining.total_seconds() % 60)
-                await message.answer(f'⚠️ You already have a task.\n⏰ Time remaining: {mins}m {secs}s\n\nUse "💼 My Task" or "📤 Submit Task"', reply_markup=get_main_menu_keyboard())
-                return
-            async with conn.transaction():
-                await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
-                await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
+            total_seconds = int(remaining.total_seconds())
+            
+            if total_seconds > 0:
+                mins = total_seconds // 60
+                secs = total_seconds % 60
+                
+                # Extract details
+                try:
+                    parts = existing['details'].split(" | ")
+                    username = parts[0].replace("Email: ", "").strip()
+                    password = parts[1].replace("Pass: ", "").strip()
+                except:
+                    username = existing['title'].replace("Login to ", "")
+                    password = "See Admin"
 
+                # Provide Submit and Cancel as inline buttons here instead of separate menu items
+                inline_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="📤 Submit", callback_data="user_submit_task"),
+                    InlineKeyboardButton(text="❌ Cancel", callback_data="user_cancel_task")
+                ]])
+
+                await message.answer(
+                    f"⚠️ **You already have an active task.**\n\n"
+                    f"🎯 **Your Current Task**\n\n"
+                    f"🆔 #{task_id}\n"
+                    f"📝 **Email:** {username} | **Password:** `{password}`\n"
+                    f"💰 **Reward:** ₹{existing['reward']}\n\n"
+                    f"⏰ Time Remaining: {mins}m {secs}s", 
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=inline_kb
+                )
+                return
+            else:
+                # Expired scenario cleanup
+                async with conn.transaction():
+                    await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
+                    await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
+
+        # Proceed to fetch new task if none exists or it was expired
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
             await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
@@ -710,49 +746,74 @@ async def get_task(message: Message, state: FSMContext):
         username = title.replace("Login to ", "")
         password = "See Admin"
 
-    await message.answer(f"🎯 **Task #{task_id}**\n\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ You have ONLY 30 MINUTES to complete this task.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
+    await message.answer(f"🎯 **Task #{task_id}**\n\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ You have ONLY 30 MINUTES to complete this task.\n\n*(Click 'Get Task' again to Submit or Cancel)*", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
 
-@dp.message(Command('mytask'))
-@dp.message(F.text == "💼 My Task")
-async def my_task(message: Message, state: FSMContext):
+
+# ============================================
+# USER INLINE SUBMIT & CANCEL SYSTEM
+# ============================================
+
+@dp.callback_query(F.data == "user_submit_task")
+async def inline_submit_task(call: CallbackQuery, state: FSMContext):
+    user_id = call.from_user.id
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+    
+    if not row:
+        await call.answer('❌ You do not have any active task.', show_alert=True)
+        return
+    if row['status'] == 'pending_review':
+        await call.answer('⏳ You have already submitted this task.', show_alert=True)
+        return
+        
+    await state.set_state(UserState.submitting_task)
+    
+    # Remove inline buttons so they can't be spammed
+    await call.message.edit_reply_markup(reply_markup=None)
+    await call.message.answer('📤 Send screenshot or proof of completed task.')
+    await call.answer()
+
+@dp.callback_query(F.data == "user_cancel_task")
+async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     await state.clear()
+    user_id = call.from_user.id
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        if not row:
+            await call.answer("❌ You don't have any active task to cancel.", show_alert=True)
+            return
+        
+        if row['status'] == 'pending_review':
+            await call.answer("❌ Cannot cancel a task already submitted for admin review.", show_alert=True)
+            return
+
+        task_id = row['task_id']
+        async with conn.transaction():
+            await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
+            await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+            
+    # Modify the original message to show it was cancelled
+    await call.message.edit_text(f"✅ Task #{task_id} has been cancelled and returned to the pool.")
+    await call.answer()
+
+
+# Fallbacks for commands if users manually type them out 
+@dp.message(Command('submit'))
+async def fallback_submit(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at FROM tasks t JOIN task_assignments a ON t.id = a.task_id WHERE a.user_id=$1', user_id)
-    if not task:
-        await message.answer('📭 You have no assigned task.', reply_markup=get_main_menu_keyboard())
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+    if not row:
+        await message.answer('❌ You do not have any active task.', reply_markup=get_main_menu_keyboard())
         return
-    
-    if task['status'] == 'pending_review':
-        await message.answer("⏳ Your task has been submitted and is under admin review. Please wait for approval.", reply_markup=get_main_menu_keyboard())
+    if row['status'] == 'pending_review':
+        await message.answer('⏳ You have already submitted this task. Please wait for admin review.', reply_markup=get_main_menu_keyboard())
         return
-
-    task_id = task['id']
-    title = task['title']
-    details = task['details']
-    reward = task['reward']
-    assigned_time = task['assigned_at']
-    
-    expire_time = assigned_time + timedelta(minutes=30)
-    remaining = expire_time - datetime.utcnow()
-    total_seconds = int(remaining.total_seconds())
-    if total_seconds <= 0:
-        await message.answer('⏰ Your task has expired.', reply_markup=get_main_menu_keyboard())
-        return
-    mins = total_seconds // 60
-    secs = total_seconds % 60
-    try:
-        parts = details.split(" | ")
-        username = parts[0].replace("Email: ", "").strip()
-        password = parts[1].replace("Pass: ", "").strip()
-    except:
-        username = title.replace("Login to ", "")
-        password = "See Admin"
-    await message.answer(f"🎯 **Your Current Task**\n\n🆔 #{task_id}\n📝 **Email:** {username} | **Password:** `{password}`\n💰 **Reward:** ₹{reward}\n\n⏰ Time Remaining: {mins}m {secs}s", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
+    await state.set_state(UserState.submitting_task)
+    await message.answer('📤 Send screenshot or proof of completed task.')
 
 @dp.message(Command("cancel_task"))
-@dp.message(F.text == "❌ Cancel Task")
-async def cancel_task(message: Message, state: FSMContext):
+async def fallback_cancel(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
@@ -771,26 +832,10 @@ async def cancel_task(message: Message, state: FSMContext):
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
     await message.answer(f"✅ Task #{task_id} has been cancelled and returned to the pool.", reply_markup=get_main_menu_keyboard())
 
-# ============================================
-# SUBMIT TASK
-# ============================================
 
-@dp.message(Command('submit'))
-@dp.message(F.text == "📤 Submit Task")
-async def submit_task(message: Message, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
-    if not row:
-        await message.answer('❌ You do not have any active task.', reply_markup=get_main_menu_keyboard())
-        return
-    if row['status'] == 'pending_review':
-        await message.answer('⏳ You have already submitted this task. Please wait for admin review.', reply_markup=get_main_menu_keyboard())
-        return
-    await state.set_state(UserState.submitting_task)
-    await message.answer('📤 Send screenshot or proof of completed task.')
-
+# ============================================
+# SUBMISSION PHOTO/TEXT HANDLER
+# ============================================
 @dp.message(UserState.submitting_task, ~F.text.startswith("/"))
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
