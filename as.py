@@ -488,21 +488,34 @@ async def add_task(message: Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID:
         return
     if not command.args:
-        await message.answer("❌ Missing details!\nUsage: `/addtask username@gmail.com password123`", parse_mode=ParseMode.MARKDOWN)
+        await message.answer("❌ Missing username!\n\nUsage: `/addtask john`", parse_mode=ParseMode.MARKDOWN)
         return
     try:
-        args = command.args.split()
-        if len(args) < 2:
-            await message.answer("❌ You must provide both a Gmail address and a password.")
-            return
-        username = args[0]
-        password = args[1]
+        username_input = command.args.strip()
+        
+        # If user provides just 'john', turn it into 'john@gmail.com'
+        if "@" not in username_input:
+            username = f"{username_input}@gmail.com"
+        else:
+            username = username_input
+
+        # Default password
+        password = "TaskVerse@#"
         default_reward = 50.0 
+        
         title = f"Login to {username}"
         details = f"Email: {username} | Pass: {password}"
+        
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO tasks (title, details, reward) VALUES ($1, $2, $3)", title, details, default_reward)
-        await message.answer(f"✅ **Task Added Successfully!**\n\n💰 **Reward:** ₹{default_reward}", parse_mode=ParseMode.MARKDOWN)
+            
+        await message.answer(
+            f"✅ **Task Added Successfully!**\n\n"
+            f"📧 **Email:** `{username}`\n"
+            f"🔑 **Password:** `{password}`\n"
+            f"💰 **Reward:** ₹{default_reward}", 
+            parse_mode=ParseMode.MARKDOWN
+        )
     except Exception as e:
         await message.answer(f"❌ Error creating task: {str(e)}")
 
