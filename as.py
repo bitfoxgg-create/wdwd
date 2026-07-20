@@ -376,6 +376,54 @@ async def top_balances(message: Message):
 
     await message.answer(text, parse_mode=ParseMode.MARKDOWN)
 
+@dp.message(Command("broadcast"))
+async def broadcast_message(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    # Option 1: Reply to a photo, text, or video message to broadcast it
+    # Option 2: Provide text directly after command `/broadcast Hello everyone!`
+    if not message.reply_to_message and not command.args:
+        await message.answer(
+            "📢 **How to Broadcast:**\n\n"
+            "1. Reply to any message/photo/file with `/broadcast`\n"
+            "2. Or type `/broadcast Your message here`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    async with aiosqlite.connect("bot.db") as db:
+        cur = await db.execute("SELECT user_id FROM users")
+        users = await cur.fetchall()
+
+    if not users:
+        await message.answer("📭 No users found in the database.")
+        return
+
+    status_msg = await message.answer(f"🚀 **Starting Broadcast** to {len(users)} users...")
+
+    success = 0
+    failed = 0
+
+    for (uid,) in users:
+        try:
+            if message.reply_to_message:
+                # Copies exact original message (works for images, text, audio, formatted text, etc.)
+                await message.reply_to_message.copy_to(chat_id=uid)
+            else:
+                await bot.send_message(chat_id=uid, text=command.args)
+            success += 1
+            await asyncio.sleep(0.05)  # Flood restriction protection delay
+        except Exception:
+            failed += 1
+
+    await status_msg.edit_text(
+        f"📢 **Broadcast Finished!**\n\n"
+        f"✅ **Sent:** {success}\n"
+        f"❌ **Failed/Blocked:** {failed}\n"
+        f"👥 **Total:** {len(users)}"
+    )
+
 @dp.message(Command("addtask"))
 async def add_task(message: Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID:
