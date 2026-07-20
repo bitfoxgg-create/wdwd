@@ -184,10 +184,7 @@ async def start(message: Message, state: FSMContext):
         "/history - Transaction history\n"
         "/cancel - Cancel current operation"
     )
-    
-    
-    
-    await message.answer(text, entities=[emoji_entity])
+    await message.answer(text, entities=[MessageEntity(type='custom_emoji', offset=0, length=2, custom_emoji_id='5877680341057015789')])
 
 @dp.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext):
