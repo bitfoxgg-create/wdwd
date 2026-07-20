@@ -115,6 +115,8 @@ async def init_db():
         await db.execute('CREATE TABLE IF NOT EXISTS withdrawals (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, upi TEXT, status TEXT DEFAULT "pending", created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         await db.execute('CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, details TEXT, reward REAL, status TEXT DEFAULT "available")')
         await db.execute('CREATE TABLE IF NOT EXISTS task_assignments (task_id INTEGER UNIQUE, user_id INTEGER, assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        # NEW: Banned users table
+        await db.execute('CREATE TABLE IF NOT EXISTS banned_users (user_id INTEGER PRIMARY KEY)')
         await db.commit()
 
 # ============================================
@@ -132,6 +134,45 @@ async def get_balance(user_id: int) -> float:
         cur = await db.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
         row = await cur.fetchone()
         return row[0] if row else 0
+
+# ============================================
+# HELPERS
+# ============================================
+
+async def ensure_user(user_id: int):
+    async with aiosqlite.connect("bot.db") as db:
+        await db.execute("INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0)", (user_id,))
+        await db.commit()
+
+async def get_balance(user_id: int) -> float:
+    await ensure_user(user_id)
+    async with aiosqlite.connect("bot.db") as db:
+        cur = await db.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+        row = await cur.fetchone()
+        return row[0] if row else 0
+
+# NEW: Ban Helper
+async def is_banned(user_id: int) -> bool:
+    async with aiosqlite.connect("bot.db") as db:
+        cur = await db.execute("SELECT 1 FROM banned_users WHERE user_id=?", (user_id,))
+        return await cur.fetchone() is not None
+
+# ============================================
+# GLOBAL BAN MIDDLEWARE (ADD IT HERE!)
+# ============================================
+
+@dp.message.outer_middleware()
+async def ban_check_middleware(handler, event: Message, data):
+    # Allow the admin to use commands even if something goes wrong
+    if event.from_user.id == ADMIN_ID:
+        return await handler(event, data)
+        
+    # Block any banned user automatically across ALL commands
+    if await is_banned(event.from_user.id):
+        await event.answer("🚫 You are banned from using this bot.")
+        return
+        
+    return await handler(event, data)        
 
 # ============================================
 # START & GLOBAL CANCEL
@@ -328,7 +369,6 @@ async def cut_balance(message: Message):
         user_id = int(user_id)
         amount = float(amount)
 
-        # Check user's current balance first
         current_balance = await get_balance(user_id)
         if amount > current_balance:
             await message.answer(f"❌ Cannot cut ₹{amount}. User's current balance is only ₹{current_balance:.2f}.")
@@ -354,7 +394,9 @@ async def check_user_balance(message: Message, command: CommandObject):
     try:
         target_id = int(command.args.strip())
         bal = await get_balance(target_id)
-        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}", parse_mode=ParseMode.MARKDOWN)
+        banned = await is_banned(target_id)
+        status = "🔴 Banned" if banned else "🟢 Active"
+        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN)
     except ValueError:
         await message.answer("❌ Invalid User ID. Please provide a valid numeric ID.")
 
@@ -376,13 +418,57 @@ async def top_balances(message: Message):
 
     await message.answer(text, parse_mode=ParseMode.MARKDOWN)
 
+@dp.message(Command("ban"))
+async def ban_user(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if not command.args:
+        await message.answer("❌ Missing User ID!\n\nUsage: `/ban 123456789`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        target_id = int(command.args.strip())
+        if target_id == ADMIN_ID:
+            await message.answer("❌ You cannot ban yourself!")
+            return
+
+        async with aiosqlite.connect("bot.db") as db:
+            await db.execute("INSERT OR IGNORE INTO banned_users (user_id) VALUES (?)", (target_id,))
+            await db.commit()
+
+        await message.answer(f"🚫 **User `{target_id}` has been banned.**", parse_mode=ParseMode.MARKDOWN)
+        try:
+            await bot.send_message(target_id, "🚫 You have been banned from using this bot.")
+        except:
+            pass
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Provide a numeric ID.")
+
+@dp.message(Command("unban"))
+async def unban_user(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+    if not command.args:
+        await message.answer("❌ Missing User ID!\n\nUsage: `/unban 123456789`", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        target_id = int(command.args.strip())
+        async with aiosqlite.connect("bot.db") as db:
+            await db.execute("DELETE FROM banned_users WHERE user_id=?", (target_id,))
+            await db.commit()
+
+        await message.answer(f"✅ **User `{target_id}` has been unbanned.**", parse_mode=ParseMode.MARKDOWN)
+        try:
+            await bot.send_message(target_id, "🎉 Your ban has been lifted! You can now use the bot again.")
+        except:
+            pass
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Provide a numeric ID.")
+
 @dp.message(Command("broadcast"))
 async def broadcast_message(message: Message, command: CommandObject):
     if message.from_user.id != ADMIN_ID:
         return
 
-    # Option 1: Reply to a photo, text, or video message to broadcast it
-    # Option 2: Provide text directly after command `/broadcast Hello everyone!`
     if not message.reply_to_message and not command.args:
         await message.answer(
             "📢 **How to Broadcast:**\n\n"
@@ -408,12 +494,11 @@ async def broadcast_message(message: Message, command: CommandObject):
     for (uid,) in users:
         try:
             if message.reply_to_message:
-                # Copies exact original message (works for images, text, audio, formatted text, etc.)
                 await message.reply_to_message.copy_to(chat_id=uid)
             else:
                 await bot.send_message(chat_id=uid, text=command.args)
             success += 1
-            await asyncio.sleep(0.05)  # Flood restriction protection delay
+            await asyncio.sleep(0.05)
         except Exception:
             failed += 1
 
