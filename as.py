@@ -172,17 +172,17 @@ async def start(message: Message, state: FSMContext):
     await state.clear()
     await ensure_user(message.from_user.id)
     text = (
-        '<tg-emoji custom_emoji_id="5377548235709619284">🔥</tg-emoji><b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji custom_emoji_id="5287684458881756303">📋</tg-emoji><b>Commands:</b>\n'
-        '/balance - Check balance\n'
-        '/sell - Sell old Gmail account\n'
-        '/task - Get random task\n'
-        '/mytask - Show current task\n'
-        '/submit - Submit completed task\n'
-        '/cancel_task - Cancel current task\n'
-        '/withdraw - Request withdrawal\n'
-        '/history - Transaction history\n'
-        '/cancel - Cancel current operation'
+        "🔥Gmail EarneX Wallet Bot\n\n"
+        "📋Commands:\n"
+        "/balance - Check balance\n"
+        "/sell - Sell old Gmail account\n"
+        "/task - Get random task\n"
+        "/mytask - Show current task\n"
+        "/submit - Submit completed task\n"
+        "/cancel_task - Cancel current task\n"
+        "/withdraw - Request withdrawal\n"
+        "/history - Transaction history\n"
+        "/cancel - Cancel current operation"
     )
     await message.answer(text, entities=[MessageEntity(type='custom_emoji', offset=0, length=2, custom_emoji_id='5877680341057015789')])
 
