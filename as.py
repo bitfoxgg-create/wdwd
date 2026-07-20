@@ -54,6 +54,10 @@ class UserState(StatesGroup):
     withdrawing = State()
     submitting_task = State()
 
+class AdminState(StatesGroup):
+    waiting_for_task_reject_reason = State()
+    waiting_for_sell_reject_reason = State()
+
 # ============================================
 # DATABASE INITIALIZATION
 # ============================================
@@ -141,9 +145,9 @@ async def is_banned(user_id: int) -> bool:
 async def edit_admin_message(call: CallbackQuery, new_text: str):
     try:
         if call.message.photo:
-            await call.message.edit_caption(caption=new_text, reply_markup=None)
+            await call.message.edit_caption(caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
-            await call.message.edit_text(text=new_text, reply_markup=None)
+            await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
 
@@ -254,7 +258,6 @@ async def approve_sell(call: CallbackQuery):
     user_id = int(user_id)
     amount = float(amount)
     
-    # Prevent double clicks by removing buttons immediately
     await edit_admin_message(call, "✅ Processing Sell Approval...")
     
     async with db_pool.acquire() as conn:
@@ -269,15 +272,43 @@ async def approve_sell(call: CallbackQuery):
     await edit_admin_message(call, "✅ Sell approved and balance credited.")
 
 @dp.callback_query(F.data.startswith("selldecline:"))
-async def decline_sell(call: CallbackQuery):
+async def decline_sell(call: CallbackQuery, state: FSMContext):
     _, user_id = call.data.split(":")
     user_id = int(user_id)
     
-    await edit_admin_message(call, "❌ Sell request declined.")
+    await state.set_state(AdminState.waiting_for_sell_reject_reason)
+    await state.update_data(
+        user_id=user_id, 
+        admin_msg_id=call.message.message_id,
+        is_photo=bool(call.message.photo)
+    )
+    await call.message.answer("❓ **Please reply with the reason for declining this sell request:**", parse_mode=ParseMode.MARKDOWN)
+    await call.answer()
+
+@dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"))
+async def process_sell_reject_reason(message: Message, state: FSMContext):
+    data = await state.get_data()
+    user_id = data['user_id']
+    admin_msg_id = data['admin_msg_id']
+    is_photo = data['is_photo']
+    reason = message.text.strip()
+
+    new_text = f"❌ <b>Sell request declined.</b>\n<b>Reason:</b> {reason}"
     try:
-        await bot.send_message(user_id, "❌ Your sell request was declined.")
+        if is_photo:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+        else:
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        print(f"Error editing admin msg: {e}")
+
+    try:
+        await bot.send_message(user_id, f"❌ <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}", parse_mode=ParseMode.HTML)
     except:
         pass
+
+    await message.answer("✅ Rejection reason sent to user.")
+    await state.clear()
 
 # ============================================
 # WITHDRAWAL
@@ -798,7 +829,7 @@ async def approve_task(call: CallbackQuery):
         pass
 
 @dp.callback_query(F.data.startswith("taskdecline:"))
-async def decline_task(call: CallbackQuery):
+async def decline_task(call: CallbackQuery, state: FSMContext):
     _, task_id, user_id = call.data.split(":")
     task_id = int(task_id)
     user_id = int(user_id)
@@ -810,16 +841,48 @@ async def decline_task(call: CallbackQuery):
             await call.answer("⚠️ Task has already been processed!", show_alert=True)
             return
 
-        async with conn.transaction():
-            await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
-            # Reset status back to available so it goes back into the pool
-            await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
-            
-    await edit_admin_message(call, "❌ Task declined and returned to pool.")
+    await state.set_state(AdminState.waiting_for_task_reject_reason)
+    await state.update_data(
+        task_id=task_id, 
+        user_id=user_id, 
+        admin_msg_id=call.message.message_id,
+        is_photo=bool(call.message.photo)
+    )
+    await call.message.answer(f"❓ **Please reply with the reason for declining Task #{task_id}:**", parse_mode=ParseMode.MARKDOWN)
+    await call.answer()
+
+@dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"))
+async def process_task_reject_reason(message: Message, state: FSMContext):
+    data = await state.get_data()
+    task_id = data['task_id']
+    user_id = data['user_id']
+    admin_msg_id = data['admin_msg_id']
+    is_photo = data['is_photo']
+    reason = message.text.strip()
+
+    async with db_pool.acquire() as conn:
+        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
+        if current_status == 'pending_review':
+            async with conn.transaction():
+                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+
+    new_text = f"❌ <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}"
     try:
-        await bot.send_message(user_id, "❌ Task submission declined. The task has been returned to the pool.")
+        if is_photo:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+        else:
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        print(f"Error editing admin msg: {e}")
+
+    try:
+        await bot.send_message(user_id, f"❌ <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.", parse_mode=ParseMode.HTML)
     except:
         pass
+
+    await message.answer("✅ Rejection reason recorded and user notified.")
+    await state.clear()
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
