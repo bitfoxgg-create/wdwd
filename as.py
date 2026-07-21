@@ -40,10 +40,10 @@ MUST_JOIN_CHANNEL = None
 # List of all menu buttons to prevent input bleeding into active states
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "➕ Add Balance", "➖ Cut Balance",
-    "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", "📢 Broadcast",
-    "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel"
+    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
+    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", 
+    "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", 
+    "📊 View Stats", "📢 Must Join Channel"
 }
 
 # ============================================
@@ -84,6 +84,7 @@ class AdminState(StatesGroup):
     waiting_for_user_transactions = State()
     waiting_for_chat_user_id = State()
     waiting_for_chat_message = State()
+    waiting_for_unassign_user_id = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -231,24 +232,50 @@ def get_main_menu_keyboard():
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
+    # Row 1
     kb.button(text="➕ Add Task", style="success")
+    kb.button(text="➕ Add Balance", style="success")
+    # Row 2
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
-    kb.button(text="➕ Add Balance", style="success")
+    kb.button(text="🗑 Unassign Tasks", style="danger")
+    # Row 3
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
+    # Row 4
     kb.button(text="🏆 Top Balances", style="primary")
     kb.button(text="🚫 Ban User", style="danger")
+    # Row 5
     kb.button(text="✅ Unban User", style="success")
     kb.button(text="📢 Broadcast", style="primary")
+    # Row 6
     kb.button(text="🏷 Update All Rewards", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
+    # Row 7
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
+    # Row 8
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(3, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 3, 2, 2, 2, 2, 2, 2)
     return kb.as_markup(resize_keyboard=True)
+
+def get_unassign_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="👤 User ID", 
+        callback_data="unassign_by_user_id", 
+        icon_custom_emoji_id="5870458774455587120",
+        style="primary"
+    )
+    kb.button(
+        text="👥 All Users", 
+        callback_data="unassign_all_users", 
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    kb.adjust(2)
+    return kb.as_markup()
 
 def get_balance_inline_keyboard(upi_set: bool):
     kb = InlineKeyboardBuilder()
@@ -713,6 +740,60 @@ async def admin_btn_chat(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_chat_user_id)
     await message.answer("💬 Send the numeric **User ID** you want to message:", parse_mode=ParseMode.MARKDOWN)
 
+# --- Admin Menu: Unassign Tasks ---
+@dp.message(F.text == "🗑 Unassign Tasks", StateFilter("*"))
+async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await message.answer(
+        "🗑 <b>Unassign Active Tasks</b>\n\n"
+        "Choose an option below:\n"
+        "• <b>User ID:</b> Unassign current active task of a specific user.\n"
+        "• <b>All Users:</b> Unassign all active tasks across all users and return them to the pool.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_unassign_inline_keyboard()
+    )
+
+@dp.callback_query(F.data == "unassign_by_user_id")
+async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminState.waiting_for_unassign_user_id)
+    await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
+    try:
+        await call.answer()
+    except:
+        pass
+
+@dp.callback_query(F.data == "unassign_all_users")
+async def process_unassign_all_users(call: CallbackQuery):
+    async with db_pool.acquire() as conn:
+        # Get count of active assigned tasks (excluding pending_review)
+        assigned_tasks = await conn.fetch('''
+            SELECT ta.task_id 
+            FROM task_assignments ta 
+            JOIN tasks t ON ta.task_id = t.id 
+            WHERE t.status = 'assigned'
+        ''')
+        
+        if not assigned_tasks:
+            try:
+                await call.answer("📭 No active assigned tasks found to unassign!", show_alert=True)
+            except:
+                pass
+            return
+
+        task_ids = [r['task_id'] for r in assigned_tasks]
+        
+        async with conn.transaction():
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
+            await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+
+    await edit_admin_message(call, f"✅ <b>Successfully unassigned {len(task_ids)} task(s) and returned them to the pool.</b>")
+    try:
+        await call.answer("Unassigned all tasks successfully!", show_alert=True)
+    except:
+        pass
+
 @dp.message(F.text == "➕ Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -839,6 +920,43 @@ async def set_must_join_command(message: Message, state: FSMContext):
 # ============================================
 # INPUT PROCESSORS FOR STATES (FILTER OUT BUTTON CLICKS)
 # ============================================
+
+@dp.message(AdminState.waiting_for_unassign_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_unassign_user_id_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow('''
+                SELECT ta.task_id, t.status 
+                FROM task_assignments ta 
+                JOIN tasks t ON ta.task_id = t.id 
+                WHERE ta.user_id=$1
+            ''', target_id)
+
+            if not row:
+                await message.answer(f"❌ User `{target_id}` does not have any active assigned task.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+                await state.clear()
+                return
+
+            if row['status'] == 'pending_review':
+                await message.answer(f"⚠️ Cannot unassign task for User `{target_id}` because it has already been submitted for review.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+                await state.clear()
+                return
+
+            task_id = row['task_id']
+            async with conn.transaction():
+                await conn.execute("DELETE FROM task_assignments WHERE user_id=$1", target_id)
+                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+
+        await message.answer(f"✅ **Task #{task_id}** held by User `{target_id}` has been unassigned and returned to the pool.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        try:
+            await bot.send_message(target_id, f"⚠️ Your current Task #{task_id} has been unassigned by the admin and returned to the pool.")
+        except:
+            pass
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Please enter a valid numeric ID.", reply_markup=get_admin_menu_keyboard())
+
+    await state.clear()
 
 @dp.message(UserState.selling, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def handle_sell(message: Message, state: FSMContext):
