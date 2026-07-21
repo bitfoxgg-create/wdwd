@@ -171,7 +171,7 @@ def get_balance_inline_keyboard(upi_set: bool):
     kb.button(
         text=f"{link_text}", 
         callback_data="link_upi", 
-        icon_custom_emoji_id="5364109867156001787",
+        icon_custom_emoji_id="6267167062292963117",
         style="primary"
     )
     kb.button(
