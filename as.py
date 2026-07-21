@@ -227,21 +227,29 @@ def get_main_menu_keyboard():
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
+    # Row 1
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="➕ Add Balance", style="success")
+    # Row 2
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
     kb.button(text="🗑 Unassign Tasks", style="danger")
+    # Row 3
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
+    # Row 4
     kb.button(text="🏆 Top Balances", style="primary")
     kb.button(text="🚫 Ban User", style="danger")
+    # Row 5
     kb.button(text="✅ Unban User", style="success")
     kb.button(text="📢 Broadcast", style="primary")
+    # Row 6
     kb.button(text="🏷 Update All Rewards", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
+    # Row 7
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
+    # Row 8
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(2, 3, 2, 2, 2, 2, 2, 2)
@@ -1327,7 +1335,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     except:
         pass
 
-@dp.message(UserState.submitting_task, F.content_types.in_({'photo', 'text'}), ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+@dp.message(UserState.submitting_task, F.photo | F.text, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
