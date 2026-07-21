@@ -73,6 +73,8 @@ class AdminState(StatesGroup):
     waiting_for_remove_task = State()
     waiting_for_broadcast = State()
     waiting_for_user_transactions = State()
+    waiting_for_chat_user_id = State()
+    waiting_for_chat_message = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -138,6 +140,16 @@ async def init_db():
                 task_id INT UNIQUE, 
                 user_id BIGINT, 
                 assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS pending_sells (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                details TEXT,
+                amount DOUBLE PRECISION DEFAULT 30.0,
+                status TEXT DEFAULT 'pending_review',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         await conn.execute('''
@@ -212,6 +224,7 @@ def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📥 Pending Reviews", style="primary")
+    kb.button(text="💬 Chat", style="primary")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -225,7 +238,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(3, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool):
@@ -435,7 +448,8 @@ async def admin_btn_pending_reviews(message: Message):
         return
         
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch('''
+        # Fetch pending task submissions
+        task_rows = await conn.fetch('''
             SELECT t.id, t.title, t.reward, ta.user_id 
             FROM tasks t 
             JOIN task_assignments ta ON t.id = ta.task_id 
@@ -443,13 +457,24 @@ async def admin_btn_pending_reviews(message: Message):
             ORDER BY ta.assigned_at ASC
         ''')
         
-    if not rows:
-        await message.answer("📭 <b>No task submissions are currently pending review!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        # Fetch pending sell requests
+        sell_rows = await conn.fetch('''
+            SELECT id, user_id, details, amount 
+            FROM pending_sells 
+            WHERE status = 'pending_review'
+            ORDER BY created_at ASC
+        ''')
+
+    total_pending = len(task_rows) + len(sell_rows)
+        
+    if total_pending == 0:
+        await message.answer("📭 <b>No pending reviews (tasks or sell requests) found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
-    await message.answer(f"📥 <b>Found {len(rows)} pending submission(s). Displaying 1 by 1:</b>", parse_mode=ParseMode.HTML)
+    await message.answer(f"📥 <b>Found {total_pending} pending item(s). Displaying 1 by 1:</b>", parse_mode=ParseMode.HTML)
 
-    for r in rows:
+    # 1. Display Pending Task Submissions
+    for r in task_rows:
         task_id = r['id']
         title = r['title']
         reward = r['reward']
@@ -469,6 +494,58 @@ async def admin_btn_pending_reviews(message: Message):
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
+
+    # 2. Display Pending Sell Requests
+    for r in sell_rows:
+        sell_id = r['id']
+        user_id = r['user_id']
+        details = r['details']
+        amount = r['amount']
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{amount}", icon_custom_emoji_id="6217663806110175239", style="success"),
+            InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+        ]])
+
+        await message.answer(
+            f'📦 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
+            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
+            f'📝 <b>Details:</b>\n{details}',
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML
+        )
+
+@dp.message(F.text == "💬 Chat")
+async def admin_btn_chat(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_chat_user_id)
+    await message.answer("💬 Send the numeric **User ID** you want to message:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_chat_user_id, ~F.text.startswith("/"))
+async def process_chat_user_id_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        await state.update_data(target_user_id=target_id)
+        await state.set_state(AdminState.waiting_for_chat_message)
+        await message.answer(f"✉️ Now send the text, photo, or media message you want to deliver to User `{target_id}`:", parse_mode=ParseMode.MARKDOWN)
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Please enter a valid numeric ID.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+
+@dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/"))
+async def process_chat_message_step(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data['target_user_id']
+
+    try:
+        await message.copy_to(chat_id=target_id)
+        await message.answer(f"✅ **Message successfully sent to User `{target_id}`!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+    except Exception as e:
+        await message.answer(f"❌ Failed to send message to User `{target_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+
+    await state.clear()
 
 @dp.message(F.text == "➕ Add Balance")
 async def admin_btn_add_balance(message: Message, state: FSMContext):
@@ -615,7 +692,10 @@ async def admin_btn_view_stats(message: Message):
         avail_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='available'")
         assigned_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='assigned'")
         pending_review_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='pending_review'")
+        pending_sells = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status='pending_review'")
         completed_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='completed'")
+
+    total_pending = (pending_review_tasks or 0) + (pending_sells or 0)
 
     text = (
         f"📊 <b>Bot Task & User Statistics</b>\n\n"
@@ -623,7 +703,7 @@ async def admin_btn_view_stats(message: Message):
         f"📋 <b>Total Tasks Added:</b> <code>{total_tasks}</code>\n"
         f"🟢 <b>Available (Unassigned Pool):</b> <code>{avail_tasks}</code>\n"
         f"💼 <b>Assigned (Active with Users):</b> <code>{assigned_tasks}</code>\n"
-        f"⏳ <b>Pending Review:</b> <code>{pending_review_tasks}</code>\n"
+        f"⏳ <b>Pending Review (Tasks + Sells):</b> <code>{total_pending}</code>\n"
         f"✅ <b>Completed (Approved):</b> <code>{completed_tasks}</code>"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
@@ -946,40 +1026,71 @@ async def sell(message: Message, state: FSMContext):
 
 @dp.message(UserState.selling, F.text, ~F.text.startswith("/"))
 async def handle_sell(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    details = message.text.strip()
+    rate = 30.0
+
+    async with db_pool.acquire() as conn:
+        sell_id = await conn.fetchval(
+            "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
+            user_id, details, rate
+        )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Approve", callback_data=f"sellapprove:{message.from_user.id}:30", icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text="Decline", callback_data=f"selldecline:{message.from_user.id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+        InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
-    await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request</b>\n\n<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> ID: {message.from_user.id}\n\n{message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+    await bot.send_message(
+        ADMIN_ID, 
+        f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request #{sell_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> User: @{message.from_user.username}\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> ID: {user_id}\n\n{details}', 
+        reply_markup=kb, 
+        parse_mode=ParseMode.HTML
+    )
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your item has been sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
-@dp.callback_query(F.data.startswith("sellapprove:"))
-async def approve_sell(call: CallbackQuery):
-    _, user_id, amount = call.data.split(":")
-    user_id = int(user_id)
-    amount = float(amount)
-    
-    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Processing Sell Approval...')
-    
+# --- Database-driven Sell Approvals ---
+@dp.callback_query(F.data.startswith("sellapprove_db:"))
+async def approve_sell_db(call: CallbackQuery):
+    _, sell_id_str, user_id_str, amount_str = call.data.split(":")
+    sell_id = int(sell_id_str)
+    user_id = int(user_id_str)
+    amount = float(amount_str)
+
     async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
+        if status != 'pending_review':
+            await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
+            return
+
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, "Gmail sell approved")
-    
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
+            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
+
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Sell request approved and balance credited.')
     try:
-        await bot.send_message(user_id, f"🎉 Sell approved!\n+₹{amount} added to your balance.")
+        await bot.send_message(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+₹{amount} added to your balance.")
     except:
         pass
-    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Sell approved and balance credited.')
 
-@dp.callback_query(F.data.startswith("selldecline:"))
-async def decline_sell(call: CallbackQuery, state: FSMContext):
-    _, user_id = call.data.split(":")
-    user_id = int(user_id)
-    
+@dp.callback_query(F.data.startswith("selldecline_db:"))
+async def decline_sell_db(call: CallbackQuery, state: FSMContext):
+    _, sell_id_str, user_id_str = call.data.split(":")
+    sell_id = int(sell_id_str)
+    user_id = int(user_id_str)
+
+    async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
+        if status != 'pending_review':
+            await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
+            return
+
     await state.set_state(AdminState.waiting_for_sell_reject_reason)
     await state.update_data(
+        sell_id=sell_id,
         user_id=user_id, 
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
@@ -990,10 +1101,15 @@ async def decline_sell(call: CallbackQuery, state: FSMContext):
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
     data = await state.get_data()
+    sell_id = data.get('sell_id')
     user_id = data['user_id']
     admin_msg_id = data['admin_msg_id']
     is_photo = data['is_photo']
     reason = message.text.strip()
+
+    if sell_id:
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)
 
     new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
     try:
