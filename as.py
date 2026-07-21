@@ -228,7 +228,7 @@ def get_main_menu_keyboard():
     kb.button(text="💰 Balance", style="primary")
     kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
-    kb.button(text="🛠 Support", style="primary")
+    kb.button(text="🛠 Support", style="danger")
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
