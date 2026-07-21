@@ -35,19 +35,18 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 
-# List of all menu buttons to prevent state bleeding
+# List of all menu buttons to prevent input bleeding
 MENU_BUTTONS = {
-    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
-    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", 
-    "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", 
-    "📊 View Stats", "📢 Must Join Channel"
+    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
+    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "➕ Add Balance", "➖ Cut Balance",
+    "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", "📢 Broadcast",
+    "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
+    "📢 Must Join Channel"
 }
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
+# DUMMY FLASK SERVER FOR RENDER FREE TIER
 # ============================================
-
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -68,6 +67,7 @@ class UserState(StatesGroup):
     selling_password = State()
     setting_upi = State()
     submitting_task = State()
+    waiting_for_support = State()
 
 class AdminState(StatesGroup):
     waiting_for_task_reject_reason = State()
@@ -111,7 +111,12 @@ async def init_db():
             )
         ''')
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
-        await conn.execute('CREATE TABLE IF NOT EXISTS banned_users (user_id BIGINT PRIMARY KEY)')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id BIGINT PRIMARY KEY
+            )
+        ''')
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS transactions (
                 id SERIAL PRIMARY KEY, 
@@ -223,55 +228,30 @@ def get_main_menu_keyboard():
     kb.button(text="💰 Balance", style="primary")
     kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
-    kb.adjust(2, 2)
+    kb.button(text="🛠 Support", style="primary")
+    kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    # Row 1
     kb.button(text="➕ Add Task", style="success")
-    kb.button(text="➕ Add Balance", style="success")
-    # Row 2
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
-    kb.button(text="🗑 Unassign Tasks", style="danger")
-    # Row 3
+    kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
-    # Row 4
     kb.button(text="🏆 Top Balances", style="primary")
     kb.button(text="🚫 Ban User", style="danger")
-    # Row 5
     kb.button(text="✅ Unban User", style="success")
     kb.button(text="📢 Broadcast", style="primary")
-    # Row 6
     kb.button(text="🏷 Update All Rewards", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
-    # Row 7
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
-    # Row 8
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 3, 2, 2, 2, 2, 2, 2)
+    kb.adjust(3, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
-
-def get_unassign_inline_keyboard():
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text="👤 User ID", 
-        callback_data="unassign_by_user_id", 
-        icon_custom_emoji_id="5870458774455587120",
-        style="primary"
-    )
-    kb.button(
-        text="👥 All Users", 
-        callback_data="unassign_all_users", 
-        icon_custom_emoji_id="5274099962655816924",
-        style="danger"
-    )
-    kb.adjust(2)
-    return kb.as_markup()
 
 def get_balance_inline_keyboard(upi_set: bool):
     kb = InlineKeyboardBuilder()
@@ -303,6 +283,16 @@ def get_task_action_keyboard():
         InlineKeyboardButton(
             text="Cancel", 
             callback_data="user_cancel_task", 
+            icon_custom_emoji_id="5274099962655816924",
+            style="danger"
+        )
+    ]])
+
+def get_support_cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="Cancel", 
+            callback_data="cancel_support", 
             icon_custom_emoji_id="5274099962655816924",
             style="danger"
         )
@@ -427,6 +417,59 @@ async def cancel(message: Message, state: FSMContext):
 async def return_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+
+# ============================================
+# SUPPORT SYSTEM
+# ============================================
+
+@dp.message(F.text == "🛠 Support", StateFilter("*"))
+async def support_button_handler(message: Message, state: FSMContext):
+    await state.clear()
+    await state.set_state(UserState.waiting_for_support)
+    await message.answer(
+        "🛠 <b>Customer Support</b>\n\n"
+        "Please send your help message or describe your issue below. Our admin team will look into it shortly.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_support_cancel_keyboard()
+    )
+
+@dp.callback_query(F.data == "cancel_support")
+async def cancel_support_callback(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await call.message.edit_text("❌ Support request cancelled.", reply_markup=None)
+    except:
+        pass
+    await call.message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+    try:
+        await call.answer()
+    except:
+        pass
+
+@dp.message(UserState.waiting_for_support, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_user_support_message(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
+    user_msg = message.text.strip()
+
+    admin_text = (
+        f"🛠 <b>New Support Request</b>\n\n"
+        f"👤 <b>User:</b> {username}\n"
+        f"🆔 <b>User ID:</b> <code>{user_id}</code>\n\n"
+        f"💬 <b>Message:</b>\n{user_msg}"
+    )
+
+    try:
+        await bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        print(f"Failed to forward support message to admin: {e}")
+
+    await message.answer(
+        "✅ <b>Your help message has been sent directly to the admin!</b> We will get back to you soon.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    await state.clear()
 
 # ============================================
 # USER MENU BUTTONS (INTERRUPTS STATES)
