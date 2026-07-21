@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import asyncpg
+import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, StateFilter
@@ -206,6 +207,17 @@ async def check_user_joined_channel(user_id: int) -> bool:
         return member.status in ['creator', 'administrator', 'member']
     except Exception as e:
         print(f"Error checking channel membership: {e}")
+        return True
+
+async def check_gmail_exists(email: str) -> bool:
+    """Queries Google's endpoint to check if a Gmail address exists."""
+    url = f"https://mail.google.com/mail/cx/id?email={email}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=5) as response:
+                return response.status == 200
+    except Exception as e:
+        print(f"Error checking Gmail endpoint: {e}")
         return True
 
 def get_must_join_keyboard():
@@ -740,7 +752,6 @@ async def admin_btn_chat(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_chat_user_id)
     await message.answer("💬 Send the numeric **User ID** you want to message:", parse_mode=ParseMode.MARKDOWN)
 
-# --- Admin Menu: Unassign Tasks ---
 @dp.message(F.text == "🗑 Unassign Tasks", StateFilter("*"))
 async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -767,7 +778,6 @@ async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "unassign_all_users")
 async def process_unassign_all_users(call: CallbackQuery):
     async with db_pool.acquire() as conn:
-        # Get count of active assigned tasks (excluding pending_review)
         assigned_tasks = await conn.fetch('''
             SELECT ta.task_id 
             FROM task_assignments ta 
@@ -1348,8 +1358,16 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 @dp.message(UserState.submitting_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        task = await conn.fetchrow(
+            'SELECT t.id, t.title, t.details, t.reward '
+            'FROM task_assignments ta '
+            'JOIN tasks t ON ta.task_id = t.id '
+            'WHERE ta.user_id=$1', 
+            user_id
+        )
+        
     if not task:
         await state.clear()
         await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
@@ -1357,8 +1375,37 @@ async def handle_task_submission(message: Message, state: FSMContext):
     
     task_id = task['id']
     title = task['title']
+    details = task['details']
     reward = task['reward']
     
+    # Extract email address from task details
+    email = None
+    try:
+        parts = details.split(" | ")
+        email = parts[0].replace("Email: ", "").strip()
+    except:
+        email = title.replace("Login to ", "").strip()
+
+    # Check if the Gmail address actually exists
+    if email and "@gmail.com" in email:
+        checking_msg = await message.answer("🔍 <b>Verifying if Gmail account exists...</b>", parse_mode=ParseMode.HTML)
+        exists = await check_gmail_exists(email)
+        try:
+            await checking_msg.delete()
+        except:
+            pass
+
+        if not exists:
+            await message.answer(
+                f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Gmail Account Not Found!</b>\n\n'
+                f'The account <code>{email}</code> does not exist on Gmail.\n\n'
+                f'👉 <b>Please complete the task first:</b> Create or login to <code>{email}</code> before submitting proof!',
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_task_action_keyboard()
+            )
+            return
+
+    # If Gmail account exists, proceed to set task to pending_review
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
@@ -1366,10 +1413,32 @@ async def handle_task_submission(message: Message, state: FSMContext):
         InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
+
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
+        await bot.send_photo(
+            ADMIN_ID, 
+            photo=message.photo[-1].file_id, 
+            caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n'
+                    f'👤 User: @{message.from_user.username}\n'
+                    f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n'
+                    f'📌 {title}\n'
+                    f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', 
+            reply_markup=kb, 
+            parse_mode=ParseMode.HTML
+        )
     else:
-        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+        await bot.send_message(
+            ADMIN_ID, 
+            f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n'
+            f'👤 User: @{message.from_user.username}\n'
+            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n'
+            f'📌 {title}\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\n'
+            f'Proof: {message.text}', 
+            reply_markup=kb, 
+            parse_mode=ParseMode.HTML
+        )
+
     await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
