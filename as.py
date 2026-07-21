@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import asyncpg
 import aiohttp
+import urllib.parse
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, StateFilter
@@ -30,7 +31,7 @@ from flask import Flask
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
-ZEROBOUNCE_API_KEY = os.environ.get('ZEROBOUNCE_API_KEY', '244df87538ba433a8717d5a221602a17')
+SCRAPEDO_API_KEY = os.environ.get('SCRAPEDO_API_KEY', 'ca85f3ff8abb4061836f33cae33f8777d4627c554af')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -212,27 +213,31 @@ async def check_user_joined_channel(user_id: int) -> bool:
 
 async def check_gmail_exists(email: str) -> bool:
     """
-    Validates email deliverability using ZeroBounce API.
-    Returns True if the status is 'valid', False if 'invalid' or uncreated.
+    Validates email deliverability using Scrape.do API.
+    Checks existence of Google/Gmail address.
     """
     email = email.strip().lower()
     if not email.endswith("@gmail.com"):
         return False
         
-    url = f"https://api.zerobounce.net/v2/validate?api_key={ZEROBOUNCE_API_KEY}&email={email}&ip_address="
+    target_url = urllib.parse.quote(f"https://accounts.google.com/InputEmail?Email={email}")
+    url = f"http://api.scrape.do/?url={target_url}&token={SCRAPEDO_API_KEY}"
+    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
+            async with session.get(url, timeout=15) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    status = data.get("status", "").lower()
-                    print(f"ZeroBounce result for {email}: {status}")
-                    return status == "valid"
+                    text = await response.text()
+                    # If Google reports "Couldn't find your Google Account"
+                    if "Couldn't find your Google Account" in text or "identifierNotFound" in text:
+                        print(f"Scrape.do verification for {email}: Invalid")
+                        return False
+                    print(f"Scrape.do verification for {email}: Valid")
+                    return True
     except Exception as e:
-        print(f"Error checking email via ZeroBounce API: {e}")
-        # Default to True on network error to prevent blocking users
+        print(f"Error checking email via Scrape.do API: {e}")
         return True
-    return False
+    return True
 
 def get_must_join_keyboard():
     channel_url = f"https://t.me/{MUST_JOIN_CHANNEL.replace('@', '')}" if MUST_JOIN_CHANNEL.startswith("@") else "https://t.me/"
@@ -998,9 +1003,9 @@ async def handle_sell(message: Message, state: FSMContext):
                     email = word.strip().replace("Username:", "").replace("user:", "").strip()
                     break
 
-    # Real-time verification using ZeroBounce API
+    # Real-time verification using Scrape.do API
     if email and "@gmail.com" in email:
-        checking_msg = await message.answer("🔍 <b>Verifying Gmail account via ZeroBounce...</b>", parse_mode=ParseMode.HTML)
+        checking_msg = await message.answer("🔍 <b>Verifying Gmail account via Scrape.do...</b>", parse_mode=ParseMode.HTML)
         exists = await check_gmail_exists(email)
         try:
             await checking_msg.delete()
@@ -1430,9 +1435,9 @@ async def handle_task_submission(message: Message, state: FSMContext):
     except:
         email = title.replace("Login to ", "").strip()
 
-    # Real-time verification using ZeroBounce API
+    # Real-time verification using Scrape.do API
     if email and "@gmail.com" in email:
-        checking_msg = await message.answer("🔍 <b>Verifying Gmail account via ZeroBounce...</b>", parse_mode=ParseMode.HTML)
+        checking_msg = await message.answer("🔍 <b>Verifying Gmail account via Scrape.do...</b>", parse_mode=ParseMode.HTML)
         exists = await check_gmail_exists(email)
         try:
             await checking_msg.delete()
@@ -1442,7 +1447,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         if not exists:
             await message.answer(
                 f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Gmail Account Not Found!</b>\n\n'
-                f'The account <code>{email}</code> does not exist or is invalid according to ZeroBounce.\n\n'
+                f'The account <code>{email}</code> does not exist or is invalid.\n\n'
                 f'👉 <b>Please complete the task first:</b> Create or login to <code>{email}</code> before submitting proof!',
                 parse_mode=ParseMode.HTML,
                 reply_markup=get_task_action_keyboard()
