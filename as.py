@@ -210,15 +210,27 @@ async def check_user_joined_channel(user_id: int) -> bool:
         return True
 
 async def check_gmail_exists(email: str) -> bool:
-    """Queries Google's endpoint to check if a Gmail address exists."""
-    url = f"https://mail.google.com/mail/cx/id?email={email}"
+    """
+    Checks if a Gmail account actually exists using Google's gxlu header response.
+    Returns True if account exists, False if uncreated.
+    """
+    email = email.strip().lower()
+    if not email.endswith("@gmail.com"):
+        return False
+        
+    url = f"https://mail.google.com/mail/gxlu?email={email}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as response:
-                return response.status == 200
+            async with session.get(url, headers=headers, timeout=5) as response:
+                cookies = response.headers.get("Set-Cookie", "")
+                # Google sets cookies only if the user account exists
+                return len(cookies) > 0 and ("COMPASS" in cookies or "gmail" in cookies.lower() or "GAUS" in cookies)
     except Exception as e:
-        print(f"Error checking Gmail endpoint: {e}")
-        return True
+        print(f"Error verifying Gmail account via Google endpoint: {e}")
+        return False
 
 def get_must_join_keyboard():
     channel_url = f"https://t.me/{MUST_JOIN_CHANNEL.replace('@', '')}" if MUST_JOIN_CHANNEL.startswith("@") else "https://t.me/"
@@ -973,6 +985,36 @@ async def handle_sell(message: Message, state: FSMContext):
     user_id = message.from_user.id
     details = message.text.strip()
     rate = 30.0
+
+    # Extract email from sell text
+    email = None
+    lines = details.split("\n")
+    for line in lines:
+        if "@gmail.com" in line.lower():
+            for word in line.split():
+                if "@gmail.com" in word.lower():
+                    email = word.strip().replace("Username:", "").replace("user:", "").strip()
+                    break
+
+    # Verify if Gmail account exists
+    if email and "@gmail.com" in email:
+        checking_msg = await message.answer("🔍 <b>Verifying if Gmail account exists...</b>", parse_mode=ParseMode.HTML)
+        exists = await check_gmail_exists(email)
+        try:
+            await checking_msg.delete()
+        except:
+            pass
+
+        if not exists:
+            await message.answer(
+                f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Gmail Account Not Found!</b>\n\n'
+                f'The account <code>{email}</code> does not exist on Gmail.\n\n'
+                f'👉 Please enter a valid, created Gmail account to sell.',
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_main_menu_keyboard()
+            )
+            await state.clear()
+            return
 
     async with db_pool.acquire() as conn:
         sell_id = await conn.fetchval(
