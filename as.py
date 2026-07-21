@@ -211,6 +211,7 @@ def get_main_menu_keyboard():
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="➕ Add Task", style="success")
+    kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -224,7 +225,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool):
@@ -428,6 +429,47 @@ async def process_add_task_step(message: Message, state: FSMContext):
     )
     await state.clear()
 
+@dp.message(F.text == "📥 Pending Reviews")
+async def admin_btn_pending_reviews(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+        
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT t.id, t.title, t.reward, ta.user_id 
+            FROM tasks t 
+            JOIN task_assignments ta ON t.id = ta.task_id 
+            WHERE t.status = 'pending_review'
+            ORDER BY ta.assigned_at ASC
+        ''')
+        
+    if not rows:
+        await message.answer("📭 <b>No task submissions are currently pending review!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        return
+
+    await message.answer(f"📥 <b>Found {len(rows)} pending submission(s). Displaying 1 by 1:</b>", parse_mode=ParseMode.HTML)
+
+    for r in rows:
+        task_id = r['id']
+        title = r['title']
+        reward = r['reward']
+        user_id = r['user_id']
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
+            InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
+        ]])
+        
+        await message.answer(
+            f'📤 <b>Pending Task Submission</b>\n\n'
+            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
+            f'📌 <b>Title:</b> {title}\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML
+        )
+
 @dp.message(F.text == "➕ Add Balance")
 async def admin_btn_add_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -568,21 +610,21 @@ async def admin_btn_view_stats(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     async with db_pool.acquire() as conn:
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks")
         avail_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='available'")
         assigned_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='assigned'")
         pending_review_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='pending_review'")
         completed_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='completed'")
-        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
 
     text = (
         f"📊 <b>Bot Task & User Statistics</b>\n\n"
-        f"👥 <b>Total Users:</b> <code>{total_users}</code>\n\n"
-        f"📋 <b>Total Tasks:</b> <code>{total_tasks}</code>\n"
-        f"🟢 <b>Available Tasks:</b> <code>{avail_tasks}</code>\n"
-        f"💼 <b>Assigned Tasks:</b> <code>{assigned_tasks}</code>\n"
+        f"👥 <b>Total Users (started bot):</b> <code>{total_users}</code>\n\n"
+        f"📋 <b>Total Tasks Added:</b> <code>{total_tasks}</code>\n"
+        f"🟢 <b>Available (Unassigned Pool):</b> <code>{avail_tasks}</code>\n"
+        f"💼 <b>Assigned (Active with Users):</b> <code>{assigned_tasks}</code>\n"
         f"⏳ <b>Pending Review:</b> <code>{pending_review_tasks}</code>\n"
-        f"✅ <b>Completed Tasks:</b> <code>{completed_tasks}</code>"
+        f"✅ <b>Completed (Approved):</b> <code>{completed_tasks}</code>"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
