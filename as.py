@@ -1,6 +1,9 @@
 import asyncio
 from datetime import datetime, timedelta
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+import os
+from threading import Thread
+from flask import Flask
+
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
@@ -11,16 +14,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     Message,
     CallbackQuery,
-    MessageEntity,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
     ChatMemberUpdated
 )
-import os
-from threading import Thread
-from flask import Flask
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 # ============================================
 # CONFIGURATION & INITIALIZATION
@@ -37,7 +35,7 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 
-# List of all menu buttons to prevent input bleeding into active states
+# List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
@@ -47,8 +45,9 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER FREE TIER
+# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
 # ============================================
+
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -64,7 +63,8 @@ def run_flask():
 # ============================================
 
 class UserState(StatesGroup):
-    selling = State()
+    selling_username = State()
+    selling_password = State()
     setting_upi = State()
     submitting_task = State()
 
@@ -110,12 +110,7 @@ async def init_db():
             )
         ''')
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
-
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS banned_users (
-                user_id BIGINT PRIMARY KEY
-            )
-        ''')
+        await conn.execute('CREATE TABLE IF NOT EXISTS banned_users (user_id BIGINT PRIMARY KEY)')
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS transactions (
                 id SERIAL PRIMARY KEY, 
@@ -543,15 +538,68 @@ async def balance(message: Message, state: FSMContext):
 @dp.message(F.text == "📨 Sell Gmail", StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
-    await state.set_state(UserState.selling)
+    await state.set_state(UserState.selling_username)
     await message.answer(
-        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> Send item details in this format:\n\n'
-        '<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> Username: example@gmail.com\n'
-        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> Password: example@123\n'
-        '<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> Rate: 30₹ Per Gmail !\n'
-        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Note: Logout After Submitting',
+        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):',
         parse_mode=ParseMode.HTML
     )
+
+@dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_sell_username(message: Message, state: FSMContext):
+    username = message.text.strip()
+    await state.update_data(sell_username=username)
+    await state.set_state(UserState.selling_password)
+    await message.answer(
+        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the **Password** for this Gmail account:',
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(UserState.selling_password, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_sell_password(message: Message, state: FSMContext):
+    password = message.text.strip()
+    data = await state.get_data()
+    username = data.get('sell_username')
+    user_id = message.from_user.id
+    rate = 30.0
+
+    details = f"Username: {username}\nPassword: {password}"
+
+    async with db_pool.acquire() as conn:
+        sell_id = await conn.fetchval(
+            "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
+            user_id, details, rate
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="Approve", callback_data=f"sell_approve:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+    ]])
+
+    # Send two separate messages to admin
+    await bot.send_message(
+        ADMIN_ID, 
+        f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request #{sell_id} (Username)</b>\n\n'
+        f'👤 User: @{message.from_user.username} (<code>{user_id}</code>)\n'
+        f'📧 <b>Username:</b> <code>{username}</code>', 
+        parse_mode=ParseMode.HTML
+    )
+
+    await bot.send_message(
+        ADMIN_ID, 
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Sell Request #{sell_id} (Password & Actions)</b>\n\n'
+        f'🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'💰 <b>Rate:</b> ₹{rate}', 
+        reply_markup=kb, 
+        parse_mode=ParseMode.HTML
+    )
+
+    await message.answer(
+        '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your account details have been sent for admin review.\n\n'
+        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device[cite: 1]!', 
+        reply_markup=get_main_menu_keyboard(), 
+        parse_mode=ParseMode.HTML
+    )
+    await state.clear()
 
 @dp.message(Command("history"), StateFilter("*"))
 @dp.message(F.text == "📜 History", StateFilter("*"))
@@ -767,7 +815,6 @@ async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "unassign_all_users")
 async def process_unassign_all_users(call: CallbackQuery):
     async with db_pool.acquire() as conn:
-        # Get count of active assigned tasks (excluding pending_review)
         assigned_tasks = await conn.fetch('''
             SELECT ta.task_id 
             FROM task_assignments ta 
@@ -954,35 +1001,8 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
         except:
             pass
     except ValueError:
-        await message.answer("❌ Invalid User ID. Please enter a valid numeric ID.", reply_markup=get_admin_menu_keyboard())
+        await message.answer("❌ Invalid User ID. Please enter a valid numeric ID.", parse_mode=ParseMode.MARKDOWN)
 
-    await state.clear()
-
-@dp.message(UserState.selling, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def handle_sell(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    details = message.text.strip()
-    rate = 30.0
-
-    async with db_pool.acquire() as conn:
-        sell_id = await conn.fetchval(
-            "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
-            user_id, details, rate
-        )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Approve", callback_data=f"sell_approve:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
-    ]])
-    await bot.send_message(
-        ADMIN_ID, 
-        f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request #{sell_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> User: @{message.from_user.username}\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> ID: {user_id}\n\n{details}', 
-        reply_markup=kb, 
-        parse_mode=ParseMode.HTML
-    )
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your item has been sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
 @dp.message(UserState.setting_upi, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -1237,47 +1257,20 @@ async def process_remove_task_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid Task ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(AdminState.waiting_for_channel_link, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_must_join_input(message: Message, state: FSMContext):
-    global MUST_JOIN_CHANNEL
-    input_text = message.text.strip()
-    
-    if input_text.lower() == 'none':
-        MUST_JOIN_CHANNEL = None
-        async with db_pool.acquire() as conn:
-            await conn.execute("DELETE FROM bot_settings WHERE key='must_join_channel'")
-        await message.answer("✅ **Must join channel feature has been disabled.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await state.clear()
+@dp.message(Command("mustjoin"), StateFilter("*"))
+@dp.message(F.text == "📢 Must Join Channel", StateFilter("*"))
+async def set_must_join_command(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
         return
-
-    if "t.me/" in input_text:
-        channel_username = "@" + input_text.split("t.me/")[1].replace("/", "").strip()
-    elif not input_text.startswith("@") and not input_text.startswith("-100"):
-        channel_username = "@" + input_text
-    else:
-        channel_username = input_text
-
-    try:
-        chat = await bot.get_chat(channel_username)
-        MUST_JOIN_CHANNEL = channel_username
-        
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO bot_settings(key, value) VALUES ('must_join_channel', $1) ON CONFLICT (key) DO UPDATE SET value=$1",
-                channel_username
-            )
-            
-        await message.answer(
-            f"✅ **Must Join Channel updated successfully!**\n\n"
-            f"<b>Channel:</b> {chat.title} (<code>{channel_username}</code>)\n\n"
-            f"<i>Make sure the bot is an admin in the channel to check user memberships!</i>",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_admin_menu_keyboard()
-        )
-    except Exception as e:
-        await message.answer(f"❌ Error connecting to channel: `{str(e)}`\n\nMake sure the channel exists and the bot is an admin there.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-
-    await state.clear()
+    await state.set_state(AdminState.waiting_for_channel_link)
+    current = MUST_JOIN_CHANNEL if MUST_JOIN_CHANNEL else "Disabled"
+    await message.answer(
+        f"📢 <b>Must Join Channel Settings</b>\n\n"
+        f"Currently set to: <code>{current}</code>\n\n"
+        f"Send the channel username (e.g. <code>@MyChannel</code>) or link (e.g. <code>https://t.me/MyChannel</code>).\n\n"
+        f"<i>Type <code>none</code> to disable forced channel joining.</i>",
+        parse_mode=ParseMode.HTML
+    )
 
 # ============================================
 # USER INLINE SUBMIT & CANCEL SYSTEM
@@ -1344,34 +1337,6 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
         await call.answer()
     except:
         pass
-
-@dp.message(UserState.submitting_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def handle_task_submission(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
-    if not task:
-        await state.clear()
-        await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
-        return
-    
-    task_id = task['id']
-    title = task['title']
-    reward = task['reward']
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
-    ]])
-    if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
-    else:
-        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
-    await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-    await state.clear()
 
 # ============================================
 # UNIFIED SELL APPROVE & DECLINE HANDLERS
