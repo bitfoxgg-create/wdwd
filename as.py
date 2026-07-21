@@ -71,7 +71,7 @@ async def init_db():
         raise ValueError("DATABASE_URL environment variable is missing!")
         
     if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
+        url = url.replace("postgres://", "postgres://", 1)
         
     db_pool = await asyncpg.create_pool(dsn=url, ssl='require')
     
@@ -83,7 +83,6 @@ async def init_db():
                 upi TEXT DEFAULT 'None'
             )
         ''')
-        # Ensure column exists for older table versions
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
 
         await conn.execute('''
@@ -152,30 +151,46 @@ async def is_banned(user_id: int) -> bool:
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    
-    # Row 1: Green buttons
     kb.button(text="✍️ Get Task", style="success")
-    kb.button(text="😀 Sell Gmail", style="success")
-    
-    # Row 2: Blue buttons
     kb.button(text="💰 Balance", style="primary")
+    kb.button(text="😀 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
-    
     kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool):
     kb = InlineKeyboardBuilder()
-    link_text = "🔗 Change UPI" if upi_set else "🔗 Link UPI"
-    kb.button(text=link_text, callback_data="link_upi")
-    kb.button(text="💸 Withdraw", callback_data="inline_withdraw")
+    link_text = "Change UPI" if upi_set else "Link UPI"
+    
+    kb.button(
+        text=f"{link_text}", 
+        callback_data="link_upi", 
+        icon_custom_emoji_id="5364109867156001787",
+        style="primary"
+    )
+    kb.button(
+        text="Withdraw", 
+        callback_data="inline_withdraw", 
+        icon_custom_emoji_id="5444856076954520455",
+        style="success"
+    )
     kb.adjust(1, 1)
     return kb.as_markup()
 
 def get_task_action_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📤 Submit", callback_data="user_submit_task"),
-        InlineKeyboardButton(text="❌ Cancel", callback_data="user_cancel_task")
+        InlineKeyboardButton(
+            text="Submit", 
+            callback_data="user_submit_task", 
+            icon_custom_emoji_id="5206607081334906820",
+            style="success"
+        ),
+        InlineKeyboardButton(
+            text="Cancel", 
+            callback_data="user_cancel_task", 
+            icon_custom_emoji_id="5274099962655816924",
+            style="danger"
+        )
     ]])
 
 async def edit_admin_message(call: CallbackQuery, new_text: str):
@@ -223,11 +238,11 @@ async def start(message: Message, state: FSMContext):
     await ensure_user(message.from_user.id)
     
     text = (
-        '<tg-emoji emoji-id="5377548235709619284">🔥</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji emoji-id="5287684458881756303">📋</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
+        '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
+        '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
         '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
         '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
-        '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5278467510604160626">💰</tg-emoji>\n'
+        '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -236,7 +251,7 @@ async def start(message: Message, state: FSMContext):
 @dp.message(F.text == "🚫 Cancel")
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer('<tg-emoji emoji-id="5240241223632954241">🚫</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard())
+    await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
 # ============================================
 # BALANCE & LINK UPI / WITHDRAW SYSTEM
@@ -253,8 +268,8 @@ async def balance(message: Message, state: FSMContext):
     upi_set = upi != "None" and upi != ""
     
     text = (
-        f"💳 <b>Balance: ₹{bal:.2f}</b>\n"
-        f"<b>UPI:</b> {upi}"
+        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
@@ -262,20 +277,20 @@ async def balance(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "link_upi")
 async def start_link_upi(call: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.setting_upi)
-    await call.message.answer("🔗 Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>", parse_mode=ParseMode.HTML)
+    await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.message(UserState.setting_upi, F.text, ~F.text.startswith("/"))
 async def process_link_upi(message: Message, state: FSMContext):
     upi_input = message.text.strip()
     if "@" not in upi_input or len(upi_input) < 5:
-        await message.answer("❌ Invalid UPI ID format. Please send a valid UPI ID (e.g. `yourname@upi`).", parse_mode=ParseMode.MARKDOWN)
+        await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Invalid UPI ID format. Please send a valid UPI ID (e.g. <code>yourname@upi</code>).', parse_mode=ParseMode.HTML)
         return
 
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET upi=$1 WHERE user_id=$2", upi_input, message.from_user.id)
 
-    await message.answer(f"✅ Your UPI ID has been linked to: `{upi_input}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_menu_keyboard())
+    await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your UPI ID has been linked to: <code>{upi_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await state.clear()
 
 @dp.callback_query(F.data == "inline_withdraw")
@@ -300,21 +315,31 @@ async def inline_withdraw_handler(call: CallbackQuery):
         )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text='💸 Pay', callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}')
-    kb.button(text='❌ Reject', callback_data=f'reject:{withdraw_id}:{call.from_user.id}')
+    kb.button(
+        text='Pay', 
+        callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}',
+        icon_custom_emoji_id="5444856076954520455",
+        style="success"
+    )
+    kb.button(
+        text='Reject', 
+        callback_data=f'reject:{withdraw_id}:{call.from_user.id}',
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
     
     await bot.send_message(
         ADMIN_ID,
-        f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
         f'👤 @{call.from_user.username}\n'
-        f'🆔 <code>{call.from_user.id}</code>\n'
-        f'💵 Amount: ₹{bal:.2f}\n'
-        f'🏦 UPI: <code>{upi}</code>',
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
 
-    await call.message.edit_text(f"⏳ Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>", parse_mode=ParseMode.HTML)
+    await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 # ============================================
@@ -329,7 +354,7 @@ async def history(message: Message):
     if not rows:
         await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
         return
-    text = '<tg-emoji emoji-id="5197288647275071607">📜</tg-emoji> <b>Last Transactions</b>\n\n'
+    text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -349,11 +374,11 @@ async def sell(message: Message, state: FSMContext):
 @dp.message(UserState.selling, F.text, ~F.text.startswith("/"))
 async def handle_sell(message: Message, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Approve", callback_data=f"sellapprove:{message.from_user.id}:30"),
-        InlineKeyboardButton(text="❌ Decline", callback_data=f"selldecline:{message.from_user.id}")
+        InlineKeyboardButton(text="Approve", callback_data=f"sellapprove:{message.from_user.id}:30", icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text="Decline", callback_data=f"selldecline:{message.from_user.id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
-    await bot.send_message(ADMIN_ID, f"📦 <b>New Sell Request</b>\n\n👤 User: @{message.from_user.username}\n🆔 ID: {message.from_user.id}\n\n{message.text}", reply_markup=kb, parse_mode=ParseMode.HTML)
-    await message.answer("✅ Your item has been sent for admin review.", reply_markup=get_main_menu_keyboard())
+    await bot.send_message(ADMIN_ID, f"📦 <b>New Sell Request</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id=\"5197269100878907942\">✍️</tg-emoji> ID: {message.from_user.id}\n\n{message.text}", reply_markup=kb, parse_mode=ParseMode.HTML)
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your item has been sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
 @dp.callback_query(F.data.startswith("sellapprove:"))
@@ -362,7 +387,7 @@ async def approve_sell(call: CallbackQuery):
     user_id = int(user_id)
     amount = float(amount)
     
-    await edit_admin_message(call, "✅ Processing Sell Approval...")
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Processing Sell Approval...')
     
     async with db_pool.acquire() as conn:
         async with conn.transaction():
@@ -373,7 +398,7 @@ async def approve_sell(call: CallbackQuery):
         await bot.send_message(user_id, f"🎉 Sell approved!\n+₹{amount} added to your balance.")
     except:
         pass
-    await edit_admin_message(call, "✅ Sell approved and balance credited.")
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Sell approved and balance credited.')
 
 @dp.callback_query(F.data.startswith("selldecline:"))
 async def decline_sell(call: CallbackQuery, state: FSMContext):
@@ -386,7 +411,7 @@ async def decline_sell(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer("❓ **Please reply with the reason for declining this sell request:**", parse_mode=ParseMode.MARKDOWN)
+    await call.message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"))
@@ -397,7 +422,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
     is_photo = data['is_photo']
     reason = message.text.strip()
 
-    new_text = f"❌ <b>Sell request declined.</b>\n<b>Reason:</b> {reason}"
+    new_text = f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -407,11 +432,11 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f"❌ <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}", parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
     except:
         pass
 
-    await message.answer("✅ Rejection reason sent to user.")
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
     await state.clear()
 
 # ============================================
@@ -436,7 +461,7 @@ async def pay_withdraw(call: CallbackQuery):
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
             
-    await edit_admin_message(call, "✅ Withdrawal marked as paid.")
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Withdrawal marked as paid.')
     try:
         await bot.send_message(user_id, f"🎉 Withdrawal of ₹{amount} has been paid.")
     except:
@@ -456,9 +481,9 @@ async def reject_withdraw(call: CallbackQuery):
 
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
         
-    await edit_admin_message(call, "❌ Withdrawal rejected.")
+    await edit_admin_message(call, '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Withdrawal rejected.')
     try:
-        await bot.send_message(user_id, "❌ Your withdrawal request was rejected.")
+        await bot.send_message(user_id, '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
         pass
 
@@ -722,7 +747,6 @@ async def get_task(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         
-        # Check for existing assigned task, bringing in task details
         existing = await conn.fetchrow('''
             SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at 
             FROM task_assignments a
@@ -735,9 +759,8 @@ async def get_task(message: Message, state: FSMContext):
             assigned_time = existing['assigned_at']
             task_status = existing['status']
             
-            # Check if task is currently under admin review
             if task_status == 'pending_review':
-                await message.answer("⏳ Your task submission is currently under admin review. Please wait for the admin to check it.", reply_markup=get_main_menu_keyboard())
+                await message.answer('<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
@@ -748,7 +771,6 @@ async def get_task(message: Message, state: FSMContext):
                 mins = total_seconds // 60
                 secs = total_seconds % 60
                 
-                # Extract details
                 try:
                     parts = existing['details'].split(" | ")
                     username = parts[0].replace("Email: ", "").strip()
@@ -758,23 +780,21 @@ async def get_task(message: Message, state: FSMContext):
                     password = "See Admin"
 
                 await message.answer(
-                    f"⚠️ **You already have an active task.**\n\n"
-                    f"🎯 **Your Current Task**\n\n"
-                    f"🆔 #{task_id}\n"
-                    f"📝 **Email:** {username} | **Password:** `{password}`\n"
-                    f"💰 **Reward:** ₹{existing['reward']}\n\n"
-                    f"⏰ Time Remaining: {mins}m {secs}s", 
-                    parse_mode=ParseMode.MARKDOWN,
+                    f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You already have an active task.</b>\n\n'
+                    f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
+                    f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
+                    f'<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Email:</b> {username} | <b>Password:</b> <code>{password}</code>\n'
+                    f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{existing["reward"]}\n\n'
+                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s', 
+                    parse_mode=ParseMode.HTML,
                     reply_markup=get_task_action_keyboard()
                 )
                 return
             else:
-                # Expired scenario cleanup
                 async with conn.transaction():
                     await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
                     await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
 
-        # Proceed to fetch new task if none exists or it was expired
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
             await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
@@ -798,11 +818,11 @@ async def get_task(message: Message, state: FSMContext):
         password = "See Admin"
 
     await message.answer(
-        f"🎯 **Task #{task_id}**\n\n"
-        f"📝 **Email:** {username} | **Password:** `{password}`\n"
-        f"💰 **Reward:** ₹{reward}\n\n"
-        f"⏰ You have ONLY 30 MINUTES to complete this task.", 
-        parse_mode=ParseMode.MARKDOWN, 
+        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Email:</b> {username} | <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}\n\n'
+        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.', 
+        parse_mode=ParseMode.HTML, 
         reply_markup=get_task_action_keyboard()
     )
 
@@ -825,9 +845,8 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
         
     await state.set_state(UserState.submitting_task)
     
-    # Remove inline buttons so they can't be spammed
     await call.message.edit_reply_markup(reply_markup=None)
-    await call.message.answer('📤 Send screenshot or proof of completed task.')
+    await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.callback_query(F.data == "user_cancel_task")
@@ -849,11 +868,10 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
             await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
             
-    # Modify the original message to show it was cancelled
-    await call.message.edit_text(f"✅ Task #{task_id} has been cancelled and returned to the pool.")
+    await call.message.edit_text(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
     await call.answer()
 
-# Fallbacks for commands if users manually type them out 
+# Fallbacks for commands
 @dp.message(Command('submit'))
 async def fallback_submit(message: Message, state: FSMContext):
     user_id = message.from_user.id
@@ -866,7 +884,7 @@ async def fallback_submit(message: Message, state: FSMContext):
         await message.answer('⏳ You have already submitted this task. Please wait for admin review.', reply_markup=get_main_menu_keyboard())
         return
     await state.set_state(UserState.submitting_task)
-    await message.answer('📤 Send screenshot or proof of completed task.')
+    await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
 @dp.message(Command("cancel_task"))
 async def fallback_cancel(message: Message, state: FSMContext):
@@ -886,7 +904,7 @@ async def fallback_cancel(message: Message, state: FSMContext):
         async with conn.transaction():
             await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
-    await message.answer(f"✅ Task #{task_id} has been cancelled and returned to the pool.", reply_markup=get_main_menu_keyboard())
+    await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
 # ============================================
 # SUBMISSION PHOTO/TEXT HANDLER
@@ -905,19 +923,18 @@ async def handle_task_submission(message: Message, state: FSMContext):
     title = task['title']
     reward = task['reward']
     
-    # Mark task as pending_review so auto_expire won't expire it or release it back to pool
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text='✅ Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}'),
-        InlineKeyboardButton(text='❌ Decline', callback_data=f'taskdecline:{task_id}:{user_id}')
+        InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'📤 **Task Submission**\n\n👤 User: @{message.from_user.username}\n🆔 Task #{task_id}\n📌 {title}\n💰 Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
     else:
-        await bot.send_message(ADMIN_ID, f'📤 **Task Submission**\n\n👤 User: @{message.from_user.username}\n🆔 Task #{task_id}\n📌 {title}\n💰 Reward: ₹{reward}\n\n📝 Proof: {message.text}', reply_markup=kb, parse_mode=ParseMode.MARKDOWN)
-    await message.answer('📤 Submission sent for admin review.', reply_markup=get_main_menu_keyboard())
+        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\n<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> Proof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+    await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
 @dp.callback_query(F.data.startswith("taskapprove:"))
@@ -928,7 +945,6 @@ async def approve_task(call: CallbackQuery):
     reward = float(reward)
     
     async with db_pool.acquire() as conn:
-        # Check task status to prevent double processing
         current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
         if current_status != 'pending_review':
             await call.answer("⚠️ Task has already been processed!", show_alert=True)
@@ -938,10 +954,9 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"Task #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
-            # Mark as completed so it NEVER goes back to the pool
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
             
-    await edit_admin_message(call, "✅ Task approved and balance credited.")
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task approved and balance credited.')
     try:
         await bot.send_message(user_id, f"🎉 Task approved!\n+₹{reward} added to your balance.")
     except:
@@ -954,7 +969,6 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
     user_id = int(user_id)
     
     async with db_pool.acquire() as conn:
-        # Check task status to prevent double processing
         current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
         if current_status != 'pending_review':
             await call.answer("⚠️ Task has already been processed!", show_alert=True)
@@ -967,7 +981,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer(f"❓ **Please reply with the reason for declining Task #{task_id}:**", parse_mode=ParseMode.MARKDOWN)
+    await call.message.answer(f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"))
@@ -986,7 +1000,7 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
                 await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
                 await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
-    new_text = f"❌ <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}"
+    new_text = f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -996,11 +1010,11 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f"❌ <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.", parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.', parse_mode=ParseMode.HTML)
     except:
         pass
 
-    await message.answer("✅ Rejection reason recorded and user notified.")
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
     await state.clear()
 
 # ============================================
@@ -1011,7 +1025,6 @@ async def auto_expire_tasks():
     while True:
         try:
             async with db_pool.acquire() as conn:
-                # Exclude tasks that are pending admin review
                 rows = await conn.fetch('''
                     SELECT ta.task_id, ta.user_id, ta.assigned_at 
                     FROM task_assignments ta
@@ -1028,7 +1041,7 @@ async def auto_expire_tasks():
                             await conn.execute('DELETE FROM task_assignments WHERE task_id=$1', task_id)
                             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
                         try:
-                            await bot.send_message(user_id, f'⏰ Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "✍️ Get Task" to get a new task.', reply_markup=get_main_menu_keyboard())
+                            await bot.send_message(user_id, f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "✍️ Get Task" to get a new task.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                         except:
                             pass
         except Exception as e:
