@@ -227,29 +227,21 @@ def get_main_menu_keyboard():
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    # Row 1
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="➕ Add Balance", style="success")
-    # Row 2
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
     kb.button(text="🗑 Unassign Tasks", style="danger")
-    # Row 3
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
-    # Row 4
     kb.button(text="🏆 Top Balances", style="primary")
     kb.button(text="🚫 Ban User", style="danger")
-    # Row 5
     kb.button(text="✅ Unban User", style="success")
     kb.button(text="📢 Broadcast", style="primary")
-    # Row 6
     kb.button(text="🏷 Update All Rewards", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
-    # Row 7
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
-    # Row 8
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(2, 3, 2, 2, 2, 2, 2, 2)
@@ -575,7 +567,6 @@ async def process_sell_password(message: Message, state: FSMContext):
         InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
 
-    # Send a single unified, clean message to admin
     admin_message_text = (
         f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
         f"👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n"
@@ -593,7 +584,7 @@ async def process_sell_password(message: Message, state: FSMContext):
 
     await message.answer(
         '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your account details have been sent for admin review.\n\n'
-        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device[cite: 1]!', 
+        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
     )
@@ -736,7 +727,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         await message.answer("📭 <b>No pending reviews (tasks or sell requests) found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
-    await message.answer(f"📥 <b>Found {total_pending} pending item(s). Displaying 1 by 1:</b>", parse_mode=ParseMode.HTML)
+    await message.answer(f"📥 <b>Found {total_pending} pending item(s). Displaying below:</b>", parse_mode=ParseMode.HTML)
 
     for r in task_rows:
         task_id = r['id']
@@ -1336,7 +1327,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     except:
         pass
 
-@dp.message(UserState.submitting_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+@dp.message(UserState.submitting_task, F.content_types.in_({'photo', 'text'}), ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
@@ -1361,6 +1352,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
     else:
         await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+    
     await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
