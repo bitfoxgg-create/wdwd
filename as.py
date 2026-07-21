@@ -71,7 +71,7 @@ async def init_db():
         raise ValueError("DATABASE_URL environment variable is missing!")
         
     if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgres://", 1)
+        url = url.replace("postgres://", "postgresql://", 1)
         
     db_pool = await asyncpg.create_pool(dsn=url, ssl='require')
     
@@ -153,7 +153,7 @@ def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="✍️ Get Task", style="success")
     kb.button(text="💰 Balance", style="primary")
-    kb.button(text="😀 Sell Gmail", style="success")
+    kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
     kb.adjust(2, 2)
     return kb.as_markup(resize_keyboard=True)
@@ -241,7 +241,7 @@ async def start(message: Message, state: FSMContext):
         '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
         '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
         '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
-        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) <tg-emoji emoji-id="5008025248314950702">😀</tg-emoji>\n'
+        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) 📨\n'
         '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
     )
     
@@ -331,7 +331,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
     await bot.send_message(
         ADMIN_ID,
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
-        f'👤 @{call.from_user.username}\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
         f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
@@ -365,11 +365,18 @@ async def history(message: Message):
 # ============================================
 
 @dp.message(Command("sell"))
-@dp.message(F.text == "😀 Sell Gmail")
+@dp.message(F.text == "📨 Sell Gmail")
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling)
-    await message.answer("📦 Send item details in this format:\n\n📧 Username: example@gmail.com\n🔑 Password: example@123\n💸 Rate: 30₹ Per Gmail !\n⚠️ Note: Logout After Submitting")
+    await message.answer(
+        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> Send item details in this format:\n\n'
+        '<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> Username: example@gmail.com\n'
+        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> Password: example@123\n'
+        '<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> Rate: 30₹ Per Gmail !\n'
+        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Note: Logout After Submitting',
+        parse_mode=ParseMode.HTML
+    )
 
 @dp.message(UserState.selling, F.text, ~F.text.startswith("/"))
 async def handle_sell(message: Message, state: FSMContext):
@@ -377,7 +384,7 @@ async def handle_sell(message: Message, state: FSMContext):
         InlineKeyboardButton(text="Approve", callback_data=f"sellapprove:{message.from_user.id}:30", icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text="Decline", callback_data=f"selldecline:{message.from_user.id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
-    await bot.send_message(ADMIN_ID, f"📦 <b>New Sell Request</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id=\"5197269100878907942\">✍️</tg-emoji> ID: {message.from_user.id}\n\n{message.text}", reply_markup=kb, parse_mode=ParseMode.HTML)
+    await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request</b>\n\n<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> ID: {message.from_user.id}\n\n{message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your item has been sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
@@ -411,7 +418,7 @@ async def decline_sell(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
+    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"))
@@ -422,7 +429,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
     is_photo = data['is_photo']
     reason = message.text.strip()
 
-    new_text = f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -432,7 +439,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
     except:
         pass
 
@@ -481,9 +488,9 @@ async def reject_withdraw(call: CallbackQuery):
 
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
         
-    await edit_admin_message(call, '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Withdrawal rejected.')
+    await edit_admin_message(call, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Withdrawal rejected.')
     try:
-        await bot.send_message(user_id, '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
         pass
 
@@ -684,11 +691,11 @@ async def add_task(message: Message, command: CommandObject):
             await conn.execute("INSERT INTO tasks (title, details, reward) VALUES ($1, $2, $3)", title, details, default_reward)
             
         await message.answer(
-            f"✅ **Task Added Successfully!**\n\n"
-            f"📧 **Email:** `{username}`\n"
-            f"🔑 **Password:** `{password}`\n"
-            f"💰 **Reward:** ₹{default_reward}", 
-            parse_mode=ParseMode.MARKDOWN
+            f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Task Added Successfully!</b>\n\n'
+            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> <code>{username}</code>\n'
+            f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{default_reward}', 
+            parse_mode=ParseMode.HTML
         )
     except Exception as e:
         await message.answer(f"❌ Error creating task: {str(e)}")
@@ -780,10 +787,10 @@ async def get_task(message: Message, state: FSMContext):
                     password = "See Admin"
 
                 await message.answer(
-                    f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You already have an active task.</b>\n\n'
+                    f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
                     f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
                     f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
-                    f'<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Email:</b> {username} | <b>Password:</b> <code>{password}</code>\n'
+                    f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
                     f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{existing["reward"]}\n\n'
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s', 
                     parse_mode=ParseMode.HTML,
@@ -819,7 +826,7 @@ async def get_task(message: Message, state: FSMContext):
 
     await message.answer(
         f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Email:</b> {username} | <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}\n\n'
         f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.', 
         parse_mode=ParseMode.HTML, 
@@ -933,7 +940,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
     if message.photo:
         await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
     else:
-        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\n<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> Proof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
     await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
@@ -981,7 +988,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer(f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
+    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"))
@@ -1000,7 +1007,7 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
                 await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
                 await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
-    new_text = f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -1010,7 +1017,7 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.', parse_mode=ParseMode.HTML)
     except:
         pass
 
