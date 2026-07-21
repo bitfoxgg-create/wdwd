@@ -63,6 +63,15 @@ class AdminState(StatesGroup):
     waiting_for_task_reject_reason = State()
     waiting_for_sell_reject_reason = State()
     waiting_for_channel_link = State()
+    waiting_for_add_balance = State()
+    waiting_for_cut_balance = State()
+    waiting_for_check_balance = State()
+    waiting_for_ban_user = State()
+    waiting_for_unban_user = State()
+    waiting_for_add_task = State()
+    waiting_for_update_rewards = State()
+    waiting_for_remove_task = State()
+    waiting_for_broadcast = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -176,7 +185,7 @@ async def check_user_joined_channel(user_id: int) -> bool:
         return member.status in ['creator', 'administrator', 'member']
     except Exception as e:
         print(f"Error checking channel membership: {e}")
-        return True  # Bypass if channel check fails due to bot permission issue
+        return True
 
 def get_must_join_keyboard():
     channel_url = f"https://t.me/{MUST_JOIN_CHANNEL.replace('@', '')}" if MUST_JOIN_CHANNEL.startswith("@") else "https://t.me/"
@@ -198,6 +207,23 @@ def get_main_menu_keyboard():
     kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
     kb.adjust(2, 2)
+    return kb.as_markup(resize_keyboard=True)
+
+def get_admin_menu_keyboard():
+    kb = ReplyKeyboardBuilder()
+    kb.button(text="➕ Add Task", style="success")
+    kb.button(text="➕ Add Balance", style="success")
+    kb.button(text="➖ Cut Balance", style="danger")
+    kb.button(text="🔎 Check Balance", style="primary")
+    kb.button(text="🏆 Top Balances", style="primary")
+    kb.button(text="🚫 Ban User", style="danger")
+    kb.button(text="✅ Unban User", style="success")
+    kb.button(text="📢 Broadcast", style="primary")
+    kb.button(text="🏷 Update All Rewards", style="primary")
+    kb.button(text="🗑 Remove Task", style="danger")
+    kb.button(text="📢 Must Join Channel", style="primary")
+    kb.button(text="🏠 Main Menu", style="primary")
+    kb.adjust(2, 2, 2, 2, 2, 2)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool):
@@ -262,7 +288,6 @@ async def global_message_middleware(handler, event: Message, data):
         await event.answer("🚫 You are banned from using this bot.")
         return
 
-    # Must Join Verification
     if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
         await event.answer(
             f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You must join our main channel to use this bot!</b>\n\n'
@@ -288,18 +313,15 @@ async def global_callback_middleware(handler, event: CallbackQuery, data):
         await event.answer("🚫 You are banned from using this bot.", show_alert=True)
         return
 
-    # Allow users to click verification button
     if event.data == "check_must_join":
         return await handler(event, data)
 
-    # Must Join Verification for all other callback buttons
     if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
         await event.answer("⚠️ You must join our channel first to use the bot!", show_alert=True)
         return
 
     return await handler(event, data)
 
-# Callback handler for Joined/Verify button
 @dp.callback_query(F.data == "check_must_join")
 async def verify_must_join_callback(call: CallbackQuery):
     user_id = call.from_user.id
@@ -313,7 +335,6 @@ async def verify_must_join_callback(call: CallbackQuery):
     else:
         await call.answer("❌ You haven't joined the channel yet! Please join and try again.", show_alert=True)
 
-# Detect if user leaves the channel
 @dp.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def user_left_channel(event: ChatMemberUpdated):
     user_id = event.from_user.id
@@ -352,11 +373,302 @@ async def cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
+@dp.message(F.text == "🏠 Main Menu")
+async def return_to_main_menu(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+
 # ============================================
-# ADMIN MUST JOIN CONFIGURATION COMMAND
+# ADMIN PANEL COMMAND & BUTTON HANDLERS
 # ============================================
 
+@dp.message(Command("adminpanel"))
+@dp.message(Command("admin"))
+async def open_admin_panel(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await message.answer(
+        "🛠 <b>Admin Control Panel</b>\n\nChoose an action from the admin menu below:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+# --- Admin Menu: Add Task ---
+@dp.message(F.text == "➕ Add Task")
+async def admin_btn_add_task(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_add_task)
+    await message.answer("📧 Send the email/username to add as a task (e.g. `example@gmail.com`):", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_add_task, ~F.text.startswith("/"))
+async def process_add_task_step(message: Message, state: FSMContext):
+    username_input = message.text.strip()
+    username = f"{username_input}@gmail.com" if "@" not in username_input else username_input
+    password = "TaskVerse@#"
+    default_reward = 50.0 
+    title = f"Login to {username}"
+    details = f"Email: {username} | Pass: {password}"
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO tasks (title, details, reward) VALUES ($1, $2, $3)", title, details, default_reward)
+        
+    await message.answer(
+        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Task Added Successfully!</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> <code>{username}</code>\n'
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{default_reward}', 
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+    await state.clear()
+
+# --- Admin Menu: Add Balance ---
+@dp.message(F.text == "➕ Add Balance")
+async def admin_btn_add_balance(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_add_balance)
+    await message.answer("💰 Send the User ID and Amount separated by space:\n\n<i>Example: 123456789 50</i>", parse_mode=ParseMode.HTML)
+
+@dp.message(AdminState.waiting_for_add_balance, ~F.text.startswith("/"))
+async def process_add_balance_step(message: Message, state: FSMContext):
+    try:
+        _, user_id_str, amount_str = f"cmd {message.text.strip()}".split()
+        user_id = int(user_id_str)
+        amount = float(amount_str)
+        await ensure_user(user_id)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "admin_add", amount, "Admin balance add")
+        await message.answer(f"✅ Added ₹{amount} to User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        try:
+            await bot.send_message(user_id, f"💰 Admin added ₹{amount} to your balance.")
+        except:
+            pass
+    except Exception as e:
+        await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
+    await state.clear()
+
+# --- Admin Menu: Cut Balance ---
+@dp.message(F.text == "➖ Cut Balance")
+async def admin_btn_cut_balance(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_cut_balance)
+    await message.answer("⚠️ Send the User ID and Amount to deduct separated by space:\n\n<i>Example: 123456789 20</i>", parse_mode=ParseMode.HTML)
+
+@dp.message(AdminState.waiting_for_cut_balance, ~F.text.startswith("/"))
+async def process_cut_balance_step(message: Message, state: FSMContext):
+    try:
+        _, user_id_str, amount_str = f"cmd {message.text.strip()}".split()
+        user_id = int(user_id_str)
+        amount = float(amount_str)
+
+        current_balance = await get_balance(user_id)
+        if amount > current_balance:
+            await message.answer(f"❌ Cannot cut ₹{amount}. User's balance is only ₹{current_balance:.2f}.", reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", amount, user_id)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "admin_cut", -amount, "Admin balance cut")
+
+        await message.answer(f"✅ Cut ₹{amount} from User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        try:
+            await bot.send_message(user_id, f"⚠️ Admin deducted ₹{amount} from your balance.")
+        except:
+            pass
+    except Exception as e:
+        await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
+    await state.clear()
+
+# --- Admin Menu: Check Balance ---
+@dp.message(F.text == "🔎 Check Balance")
+async def admin_btn_check_balance(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_check_balance)
+    await message.answer("🔎 Send the numeric User ID to check:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_check_balance, ~F.text.startswith("/"))
+async def process_check_balance_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        user_data = await get_user_data(target_id)
+        bal = user_data['balance'] if user_data else 0.0
+        upi = user_data['upi'] if user_data else "None"
+        banned = await is_banned(target_id)
+        status = "🔴 Banned" if banned else "🟢 Active"
+        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n🏦 **UPI:** `{upi}`\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+    except ValueError:
+        await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+# --- Admin Menu: Top Balances ---
+@dp.message(F.text == "🏆 Top Balances")
+async def admin_btn_top_balances(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
+
+    if not rows:
+        await message.answer("📭 No users found in database.", reply_markup=get_admin_menu_keyboard())
+        return
+
+    text = "🏆 **Top 10 Balance Holders**\n\n"
+    for idx, r in enumerate(rows, start=1):
+        text += f"**{idx}.** User ID: `{r['user_id']}` — **₹{r['balance']:.2f}**\n"
+
+    await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+
+# --- Admin Menu: Ban User ---
+@dp.message(F.text == "🚫 Ban User")
+async def admin_btn_ban_user(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_ban_user)
+    await message.answer("🚫 Send the numeric User ID to ban:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_ban_user, ~F.text.startswith("/"))
+async def process_ban_user_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        if target_id == ADMIN_ID:
+            await message.answer("❌ You cannot ban yourself!", reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
+
+        BANNED_USERS_CACHE.add(target_id)
+        await message.answer(f"🚫 **User `{target_id}` has been banned.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        try:
+            await bot.send_message(target_id, "🚫 You have been banned from using this bot.")
+        except:
+            pass
+    except ValueError:
+        await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+# --- Admin Menu: Unban User ---
+@dp.message(F.text == "✅ Unban User")
+async def admin_btn_unban_user(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_unban_user)
+    await message.answer("✅ Send the numeric User ID to unban:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_unban_user, ~F.text.startswith("/"))
+async def process_unban_user_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
+
+        BANNED_USERS_CACHE.discard(target_id)
+        await message.answer(f"✅ **User `{target_id}` has been unbanned.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        try:
+            await bot.send_message(target_id, "🎉 Your ban has been lifted! You can now use the bot again.")
+        except:
+            pass
+    except ValueError:
+        await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+# --- Admin Menu: Broadcast ---
+@dp.message(F.text == "📢 Broadcast")
+async def admin_btn_broadcast(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_broadcast)
+    await message.answer("📢 Send or forward the broadcast message below:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_broadcast, ~F.text.startswith("/"))
+async def process_broadcast_step(message: Message, state: FSMContext):
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users")
+
+    if not users:
+        await message.answer("📭 No users found in database.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    status_msg = await message.answer(f"🚀 **Starting Broadcast** to {len(users)} users...")
+    success = 0
+    failed = 0
+
+    for r in users:
+        uid = r['user_id']
+        try:
+            await message.copy_to(chat_id=uid)
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            failed += 1
+
+    await status_msg.edit_text(
+        f"📢 **Broadcast Finished!**\n\n"
+        f"✅ **Sent:** {success}\n"
+        f"❌ **Failed/Blocked:** {failed}\n"
+        f"👥 **Total:** {len(users)}"
+    )
+    await state.clear()
+
+# --- Admin Menu: Update All Rewards ---
+@dp.message(F.text == "🏷 Update All Rewards")
+async def admin_btn_update_rewards(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_update_rewards)
+    await message.answer("💰 Send the new reward amount for ALL tasks (e.g. `40.0`):", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_update_rewards, ~F.text.startswith("/"))
+async def process_update_rewards_step(message: Message, state: FSMContext):
+    try:
+        new_reward = float(message.text.strip())
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE tasks SET reward=$1", new_reward)
+        await message.answer(f"💰 **Success!** Reward for ALL tasks updated to **₹{new_reward:.2f}**.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+    except ValueError:
+        await message.answer("❌ Invalid reward amount.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+# --- Admin Menu: Remove Task ---
+@dp.message(F.text == "🗑 Remove Task")
+async def admin_btn_remove_task(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_remove_task)
+    await message.answer("🗑 Send the Task ID to remove (e.g. `3`):", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_remove_task, ~F.text.startswith("/"))
+async def process_remove_task_step(message: Message, state: FSMContext):
+    try:
+        task_id = int(message.text.strip())
+        async with db_pool.acquire() as conn:
+            task = await conn.fetchrow("SELECT id FROM tasks WHERE id=$1", task_id)
+            if not task:
+                await message.answer(f"❌ Task #{task_id} does not exist.", reply_markup=get_admin_menu_keyboard())
+                await state.clear()
+                return
+            async with conn.transaction():
+                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+                await conn.execute("DELETE FROM tasks WHERE id=$1", task_id)
+        await message.answer(f"🗑️ **Task #{task_id}** permanently removed.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+    except ValueError:
+        await message.answer("❌ Invalid Task ID.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+# --- Admin Menu: Must Join Channel ---
 @dp.message(Command("mustjoin"))
+@dp.message(F.text == "📢 Must Join Channel")
 async def set_must_join_command(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -379,11 +691,10 @@ async def process_must_join_input(message: Message, state: FSMContext):
         MUST_JOIN_CHANNEL = None
         async with db_pool.acquire() as conn:
             await conn.execute("DELETE FROM bot_settings WHERE key='must_join_channel'")
-        await message.answer("✅ **Must join channel feature has been disabled.**", parse_mode=ParseMode.MARKDOWN)
+        await message.answer("✅ **Must join channel feature has been disabled.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         await state.clear()
         return
 
-    # Extract username from link or input
     if "t.me/" in input_text:
         channel_username = "@" + input_text.split("t.me/")[1].replace("/", "").strip()
     elif not input_text.startswith("@") and not input_text.startswith("-100"):
@@ -392,7 +703,6 @@ async def process_must_join_input(message: Message, state: FSMContext):
         channel_username = input_text
 
     try:
-        # Test bot's access to the channel
         chat = await bot.get_chat(channel_username)
         MUST_JOIN_CHANNEL = channel_username
         
@@ -406,10 +716,11 @@ async def process_must_join_input(message: Message, state: FSMContext):
             f"✅ **Must Join Channel updated successfully!**\n\n"
             f"<b>Channel:</b> {chat.title} (<code>{channel_username}</code>)\n\n"
             f"<i>Make sure the bot is an admin in the channel to check user memberships!</i>",
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
         )
     except Exception as e:
-        await message.answer(f"❌ Error connecting to channel: `{str(e)}`\n\nMake sure the channel exists and the bot is an admin there.", parse_mode=ParseMode.MARKDOWN)
+        await message.answer(f"❌ Error connecting to channel: `{str(e)}`\n\nMake sure the channel exists and the bot is an admin there.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
 
     await state.clear()
 
@@ -655,7 +966,7 @@ async def reject_withdraw(call: CallbackQuery):
         pass
 
 # ============================================
-# ADMIN CONTROLS
+# SLASH COMMAND FALLBACKS (ADMIN SIDE)
 # ============================================
 
 @dp.message(Command("add"))
@@ -835,14 +1146,11 @@ async def add_task(message: Message, command: CommandObject):
         return
     try:
         username_input = command.args.strip()
-        
-        # Append @gmail.com automatically if not provided
         if "@" not in username_input:
             username = f"{username_input}@gmail.com"
         else:
             username = username_input
 
-        # Default password and reward
         password = "TaskVerse@#"
         default_reward = 50.0 
         
