@@ -575,20 +575,18 @@ async def process_sell_password(message: Message, state: FSMContext):
         InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
 
-    # Send two separate messages to admin
-    await bot.send_message(
-        ADMIN_ID, 
-        f'<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>New Sell Request #{sell_id} (Username)</b>\n\n'
-        f'👤 User: @{message.from_user.username} (<code>{user_id}</code>)\n'
-        f'📧 <b>Username:</b> <code>{username}</code>', 
-        parse_mode=ParseMode.HTML
+    # Send a single unified, clean message to admin
+    admin_message_text = (
+        f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
+        f"👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n"
+        f"📧 <b>Username:</b> <code>{username}</code>\n"
+        f"🔑 <b>Password:</b> <code>{password}</code>\n"
+        f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
     )
 
     await bot.send_message(
         ADMIN_ID, 
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Sell Request #{sell_id} (Password & Actions)</b>\n\n'
-        f'🔑 <b>Password:</b> <code>{password}</code>\n'
-        f'💰 <b>Rate:</b> ₹{rate}', 
+        admin_message_text, 
         reply_markup=kb, 
         parse_mode=ParseMode.HTML
     )
@@ -773,7 +771,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         ]])
 
         await message.answer(
-            f'📦 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
+            f'📨 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
             f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
             f'📝 <b>Details:</b>\n{details}',
@@ -1337,6 +1335,34 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
         await call.answer()
     except:
         pass
+
+@dp.message(UserState.submitting_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def handle_task_submission(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    async with db_pool.acquire() as conn:
+        task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+    if not task:
+        await state.clear()
+        await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
+        return
+    
+    task_id = task['id']
+    title = task['title']
+    reward = task['reward']
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
+    ]])
+    if message.photo:
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
+    else:
+        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+    await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    await state.clear()
 
 # ============================================
 # UNIFIED SELL APPROVE & DECLINE HANDLERS
