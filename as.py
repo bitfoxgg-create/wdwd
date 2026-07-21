@@ -354,7 +354,7 @@ async def history(message: Message):
     if not rows:
         await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
         return
-    text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
+    text = '<tg-emoji emoji-id="5197288647275071607">😀</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -439,7 +439,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n💬 <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
     except:
         pass
 
@@ -1017,7 +1017,7 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
         print(f"Error editing admin msg: {e}")
 
     try:
-        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🔄 The task has been returned to the pool.', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.', parse_mode=ParseMode.HTML)
     except:
         pass
 
