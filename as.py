@@ -37,7 +37,7 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 
-# List of all menu buttons to prevent input bleeding
+# List of all menu buttons to prevent input bleeding into active states
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "➕ Add Balance", "➖ Cut Balance",
@@ -619,8 +619,8 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         amount = r['amount']
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{amount}", icon_custom_emoji_id="6217663806110175239", style="success"),
-            InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+            InlineKeyboardButton(text="Approve", callback_data=f"sell_approve:{sell_id}:{user_id}:{amount}", icon_custom_emoji_id="6217663806110175239", style="success"),
+            InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
         ]])
 
         await message.answer(
@@ -779,8 +779,8 @@ async def handle_sell(message: Message, state: FSMContext):
         )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+        InlineKeyboardButton(text="Approve", callback_data=f"sell_approve:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
+        InlineKeyboardButton(text="Decline", callback_data=f"sell_decline:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
     await bot.send_message(
         ADMIN_ID, 
@@ -1136,6 +1136,90 @@ async def handle_task_submission(message: Message, state: FSMContext):
     await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
+# ============================================
+# UNIFIED SELL APPROVE & DECLINE HANDLERS
+# ============================================
+
+@dp.callback_query(F.data.startswith("sell_approve:"))
+async def approve_sell_unified(call: CallbackQuery):
+    _, sell_id_str, user_id_str, amount_str = call.data.split(":")
+    sell_id = int(sell_id_str)
+    user_id = int(user_id_str)
+    amount = float(amount_str)
+
+    async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
+        if status != 'pending_review':
+            await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
+            return
+
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
+            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
+
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Sell request approved and balance credited.')
+    try:
+        await bot.send_message(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+₹{amount} added to your balance.")
+    except:
+        pass
+
+@dp.callback_query(F.data.startswith("sell_decline:"))
+async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
+    _, sell_id_str, user_id_str = call.data.split(":")
+    sell_id = int(sell_id_str)
+    user_id = int(user_id_str)
+
+    async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
+        if status != 'pending_review':
+            await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
+            return
+
+    await state.set_state(AdminState.waiting_for_sell_reject_reason)
+    await state.update_data(
+        sell_id=sell_id,
+        user_id=user_id, 
+        admin_msg_id=call.message.message_id,
+        is_photo=bool(call.message.photo)
+    )
+    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
+    await call.answer()
+
+@dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_sell_reject_reason(message: Message, state: FSMContext):
+    data = await state.get_data()
+    sell_id = data.get('sell_id')
+    user_id = data['user_id']
+    admin_msg_id = data['admin_msg_id']
+    is_photo = data['is_photo']
+    reason = message.text.strip()
+
+    if sell_id:
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)
+
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
+    try:
+        if is_photo:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+        else:
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        print(f"Error editing admin msg: {e}")
+
+    try:
+        await bot.send_message(user_id, f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', parse_mode=ParseMode.HTML)
+    except:
+        pass
+
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
+    await state.clear()
+
+# ============================================
+# TASK APPROVE & DECLINE HANDLERS
+# ============================================
+
 @dp.callback_query(F.data.startswith("taskapprove:"))
 async def approve_task(call: CallbackQuery):
     _, task_id_str, callback_user_id, reward_str = call.data.split(":")
@@ -1217,6 +1301,54 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
     await state.clear()
+
+# ============================================
+# WITHDRAWAL CALLBACKS (ADMIN SIDE)
+# ============================================
+
+@dp.callback_query(F.data.startswith("pay:"))
+async def pay_withdraw(call: CallbackQuery):
+    _, withdrawal_id, user_id, amount = call.data.split(":")
+    withdrawal_id = int(withdrawal_id)
+    user_id = int(user_id)
+    amount = float(amount)
+    
+    async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if status != 'pending':
+            await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
+            return
+
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", amount, user_id)
+            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
+            
+    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Withdrawal marked as paid.')
+    try:
+        await bot.send_message(user_id, f"🎉 Withdrawal of ₹{amount} has been paid.")
+    except:
+        pass
+
+@dp.callback_query(F.data.startswith("reject:"))
+async def reject_withdraw(call: CallbackQuery):
+    _, withdrawal_id, user_id = call.data.split(":")
+    withdrawal_id = int(withdrawal_id)
+    user_id = int(user_id)
+    
+    async with db_pool.acquire() as conn:
+        status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if status != 'pending':
+            await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
+            return
+
+        await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
+        
+    await edit_admin_message(call, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Withdrawal rejected.')
+    try:
+        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
+    except:
+        pass
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
