@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -15,7 +15,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     ReplyKeyboardMarkup,
-    KeyboardButton
+    KeyboardButton,
+    ChatMemberUpdated
 )
 import os
 from threading import Thread
@@ -34,6 +35,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 db_pool = None
 BANNED_USERS_CACHE = set()
+MUST_JOIN_CHANNEL = None  # In-memory storage for mandatory channel username/ID
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER FREE TIER
@@ -60,6 +62,7 @@ class UserState(StatesGroup):
 class AdminState(StatesGroup):
     waiting_for_task_reject_reason = State()
     waiting_for_sell_reject_reason = State()
+    waiting_for_channel_link = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -127,13 +130,22 @@ async def init_db():
                 assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS bot_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
 
-async def load_banned_users_cache():
-    """Load banned users into memory at startup to eliminate DB middleware lag."""
-    global BANNED_USERS_CACHE
+async def load_settings_and_cache():
+    """Load banned users and channel settings into memory at startup."""
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
+        
+        channel_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='must_join_channel'")
+        MUST_JOIN_CHANNEL = channel_val if channel_val else None
 
 # ============================================
 # HELPERS & KEYBOARDS
@@ -155,6 +167,30 @@ async def get_balance(user_id: int) -> float:
 async def is_banned(user_id: int) -> bool:
     return user_id in BANNED_USERS_CACHE
 
+async def check_user_joined_channel(user_id: int) -> bool:
+    """Check if the user is a member of the mandatory channel."""
+    if not MUST_JOIN_CHANNEL:
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id=MUST_JOIN_CHANNEL, user_id=user_id)
+        return member.status in ['creator', 'administrator', 'member']
+    except Exception as e:
+        print(f"Error checking channel membership: {e}")
+        return True  # Bypass if channel check fails due to bot permission issue
+
+def get_must_join_keyboard():
+    channel_url = f"https://t.me/{MUST_JOIN_CHANNEL.replace('@', '')}" if MUST_JOIN_CHANNEL.startswith("@") else "https://t.me/"
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📢 Join Channel", url=channel_url)
+    kb.button(
+        text="Joined / Verify", 
+        callback_data="check_must_join",
+        icon_custom_emoji_id="6217663806110175239",
+        style="success"
+    )
+    kb.adjust(1, 1)
+    return kb.as_markup()
+
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="✍️ Get Task", style="success")
@@ -171,7 +207,7 @@ def get_balance_inline_keyboard(upi_set: bool):
     kb.button(
         text=f"{link_text}", 
         callback_data="link_upi", 
-        icon_custom_emoji_id="6267167062292963117",
+        icon_custom_emoji_id="5364109867156001787",
         style="primary"
     )
     kb.button(
@@ -209,30 +245,87 @@ async def edit_admin_message(call: CallbackQuery, new_text: str):
         print(f"Error editing admin message: {e}")
 
 # ============================================
-# GLOBAL BAN MIDDLEWARES
+# GLOBAL BAN & MUST-JOIN MIDDLEWARES
 # ============================================
 
 @dp.message.outer_middleware()
-async def ban_check_message_middleware(handler, event: Message, data):
-    if event.from_user and event.from_user.id == ADMIN_ID:
+async def global_message_middleware(handler, event: Message, data):
+    if not event.from_user:
+        return await handler(event, data)
+
+    user_id = event.from_user.id
+
+    if user_id == ADMIN_ID:
         return await handler(event, data)
         
-    if event.from_user and await is_banned(event.from_user.id):
+    if await is_banned(user_id):
         await event.answer("🚫 You are banned from using this bot.")
         return
-        
+
+    # Must Join Verification
+    if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
+        await event.answer(
+            f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You must join our main channel to use this bot!</b>\n\n'
+            f'Please join the channel below and click verify.',
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_must_join_keyboard()
+        )
+        return
+
     return await handler(event, data)
 
 @dp.callback_query.outer_middleware()
-async def ban_check_callback_middleware(handler, event: CallbackQuery, data):
-    if event.from_user and event.from_user.id == ADMIN_ID:
+async def global_callback_middleware(handler, event: CallbackQuery, data):
+    if not event.from_user:
+        return await handler(event, data)
+
+    user_id = event.from_user.id
+
+    if user_id == ADMIN_ID:
         return await handler(event, data)
         
-    if event.from_user and await is_banned(event.from_user.id):
+    if await is_banned(user_id):
         await event.answer("🚫 You are banned from using this bot.", show_alert=True)
         return
-        
+
+    # Allow users to click verification button
+    if event.data == "check_must_join":
+        return await handler(event, data)
+
+    # Must Join Verification for all other callback buttons
+    if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
+        await event.answer("⚠️ You must join our channel first to use the bot!", show_alert=True)
+        return
+
     return await handler(event, data)
+
+# Callback handler for Joined/Verify button
+@dp.callback_query(F.data == "check_must_join")
+async def verify_must_join_callback(call: CallbackQuery):
+    user_id = call.from_user.id
+    if await check_user_joined_channel(user_id):
+        await call.message.delete()
+        await call.message.answer(
+            f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Verification successful! You can now use the bot.</b>',
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await call.answer("❌ You haven't joined the channel yet! Please join and try again.", show_alert=True)
+
+# Detect if user leaves the channel
+@dp.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
+async def user_left_channel(event: ChatMemberUpdated):
+    user_id = event.from_user.id
+    try:
+        await bot.send_message(
+            user_id,
+            '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You left our official channel!</b>\n\nAccess to the bot has been paused. Rejoin the channel to use the bot again.',
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_must_join_keyboard()
+        )
+    except Exception:
+        pass
 
 # ============================================
 # START & GLOBAL CANCEL
@@ -258,6 +351,67 @@ async def start(message: Message, state: FSMContext):
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+
+# ============================================
+# ADMIN MUST JOIN CONFIGURATION COMMAND
+# ============================================
+
+@dp.message(Command("mustjoin"))
+async def set_must_join_command(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_channel_link)
+    current = MUST_JOIN_CHANNEL if MUST_JOIN_CHANNEL else "Disabled"
+    await message.answer(
+        f"📢 <b>Must Join Channel Settings</b>\n\n"
+        f"Currently set to: <code>{current}</code>\n\n"
+        f"Send the channel username (e.g. <code>@MyChannel</code>) or link (e.g. <code>https://t.me/MyChannel</code>).\n\n"
+        f"<i>Type <code>none</code> to disable forced channel joining.</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_channel_link, ~F.text.startswith("/"))
+async def process_must_join_input(message: Message, state: FSMContext):
+    global MUST_JOIN_CHANNEL
+    input_text = message.text.strip()
+    
+    if input_text.lower() == 'none':
+        MUST_JOIN_CHANNEL = None
+        async with db_pool.acquire() as conn:
+            await conn.execute("DELETE FROM bot_settings WHERE key='must_join_channel'")
+        await message.answer("✅ **Must join channel feature has been disabled.**", parse_mode=ParseMode.MARKDOWN)
+        await state.clear()
+        return
+
+    # Extract username from link or input
+    if "t.me/" in input_text:
+        channel_username = "@" + input_text.split("t.me/")[1].replace("/", "").strip()
+    elif not input_text.startswith("@") and not input_text.startswith("-100"):
+        channel_username = "@" + input_text
+    else:
+        channel_username = input_text
+
+    try:
+        # Test bot's access to the channel
+        chat = await bot.get_chat(channel_username)
+        MUST_JOIN_CHANNEL = channel_username
+        
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO bot_settings(key, value) VALUES ('must_join_channel', $1) ON CONFLICT (key) DO UPDATE SET value=$1",
+                channel_username
+            )
+            
+        await message.answer(
+            f"✅ **Must Join Channel updated successfully!**\n\n"
+            f"<b>Channel:</b> {chat.title} (<code>{channel_username}</code>)\n\n"
+            f"<i>Make sure the bot is an admin in the channel to check user memberships!</i>",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        await message.answer(f"❌ Error connecting to channel: `{str(e)}`\n\nMake sure the channel exists and the bot is an admin there.", parse_mode=ParseMode.MARKDOWN)
+
+    await state.clear()
 
 # ============================================
 # BALANCE & LINK UPI / WITHDRAW SYSTEM
@@ -597,7 +751,7 @@ async def ban_user(message: Message, command: CommandObject):
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
 
-        BANNED_USERS_CACHE.add(target_id)  # Update in-memory cache immediately
+        BANNED_USERS_CACHE.add(target_id)
         await message.answer(f"🚫 **User `{target_id}` has been banned.**", parse_mode=ParseMode.MARKDOWN)
         try:
             await bot.send_message(target_id, "🚫 You have been banned from using this bot.")
@@ -618,7 +772,7 @@ async def unban_user(message: Message, command: CommandObject):
         async with db_pool.acquire() as conn:
             await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
 
-        BANNED_USERS_CACHE.discard(target_id)  # Update in-memory cache immediately
+        BANNED_USERS_CACHE.discard(target_id)
         await message.answer(f"✅ **User `{target_id}` has been unbanned.**", parse_mode=ParseMode.MARKDOWN)
         try:
             await bot.send_message(target_id, "🎉 Your ban has been lifted! You can now use the bot again.")
@@ -1069,7 +1223,7 @@ async def auto_expire_tasks():
 
 async def main():
     await init_db()
-    await load_banned_users_cache()
+    await load_settings_and_cache()
     asyncio.create_task(auto_expire_tasks())
     
     server_thread = Thread(target=run_flask)
