@@ -4,7 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER
+from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -364,10 +364,10 @@ async def user_left_channel(event: ChatMemberUpdated):
         pass
 
 # ============================================
-# START & GLOBAL CANCEL
+# START & GLOBAL CANCEL (INTERRUPTS ALL STATES)
 # ============================================
 
-@dp.message(Command("start"))
+@dp.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext):
     await state.clear()
     await ensure_user(message.from_user.id)
@@ -382,23 +382,23 @@ async def start(message: Message, state: FSMContext):
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
 
-@dp.message(Command("cancel"))
-@dp.message(F.text == "🚫 Cancel")
+@dp.message(Command("cancel"), StateFilter("*"))
+@dp.message(F.text == "🚫 Cancel", StateFilter("*"))
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
     await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
 
-@dp.message(F.text == "🏠 Main Menu")
+@dp.message(F.text == "🏠 Main Menu", StateFilter("*"))
 async def return_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
 
 # ============================================
-# ADMIN PANEL COMMAND & BUTTON HANDLERS
+# ADMIN PANEL COMMAND & BUTTON HANDLERS (INTERRUPTS STATES)
 # ============================================
 
-@dp.message(Command("adminpanel"))
-@dp.message(Command("admin"))
+@dp.message(Command("adminpanel"), StateFilter("*"))
+@dp.message(Command("admin"), StateFilter("*"))
 async def open_admin_panel(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -409,7 +409,7 @@ async def open_admin_panel(message: Message, state: FSMContext):
         reply_markup=get_admin_menu_keyboard()
     )
 
-@dp.message(F.text == "➕ Add Task")
+@dp.message(F.text == "➕ Add Task", StateFilter("*"))
 async def admin_btn_add_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -442,13 +442,13 @@ async def process_add_task_step(message: Message, state: FSMContext):
     )
     await state.clear()
 
-@dp.message(F.text == "📥 Pending Reviews")
-async def admin_btn_pending_reviews(message: Message):
+@dp.message(F.text == "📥 Pending Reviews", StateFilter("*"))
+async def admin_btn_pending_reviews(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
         
     async with db_pool.acquire() as conn:
-        # Fetch pending task submissions
         task_rows = await conn.fetch('''
             SELECT t.id, t.title, t.reward, ta.user_id 
             FROM tasks t 
@@ -457,7 +457,6 @@ async def admin_btn_pending_reviews(message: Message):
             ORDER BY ta.assigned_at ASC
         ''')
         
-        # Fetch pending sell requests
         sell_rows = await conn.fetch('''
             SELECT id, user_id, details, amount 
             FROM pending_sells 
@@ -473,7 +472,6 @@ async def admin_btn_pending_reviews(message: Message):
 
     await message.answer(f"📥 <b>Found {total_pending} pending item(s). Displaying 1 by 1:</b>", parse_mode=ParseMode.HTML)
 
-    # 1. Display Pending Task Submissions
     for r in task_rows:
         task_id = r['id']
         title = r['title']
@@ -495,7 +493,6 @@ async def admin_btn_pending_reviews(message: Message):
             parse_mode=ParseMode.HTML
         )
 
-    # 2. Display Pending Sell Requests
     for r in sell_rows:
         sell_id = r['id']
         user_id = r['user_id']
@@ -516,7 +513,7 @@ async def admin_btn_pending_reviews(message: Message):
             parse_mode=ParseMode.HTML
         )
 
-@dp.message(F.text == "💬 Chat")
+@dp.message(F.text == "💬 Chat", StateFilter("*"))
 async def admin_btn_chat(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -547,7 +544,7 @@ async def process_chat_message_step(message: Message, state: FSMContext):
 
     await state.clear()
 
-@dp.message(F.text == "➕ Add Balance")
+@dp.message(F.text == "➕ Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -574,7 +571,7 @@ async def process_add_balance_step(message: Message, state: FSMContext):
         await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
     await state.clear()
 
-@dp.message(F.text == "➖ Cut Balance")
+@dp.message(F.text == "➖ Cut Balance", StateFilter("*"))
 async def admin_btn_cut_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -608,7 +605,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
         await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
     await state.clear()
 
-@dp.message(F.text == "🔎 Check Balance")
+@dp.message(F.text == "🔎 Check Balance", StateFilter("*"))
 async def admin_btn_check_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -629,10 +626,11 @@ async def process_check_balance_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "🏆 Top Balances")
-async def admin_btn_top_balances(message: Message):
+@dp.message(F.text == "🏆 Top Balances", StateFilter("*"))
+async def admin_btn_top_balances(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
 
@@ -646,7 +644,7 @@ async def admin_btn_top_balances(message: Message):
 
     await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "💳 Transactions")
+@dp.message(F.text == "💳 Transactions", StateFilter("*"))
 async def admin_btn_transactions(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -682,10 +680,11 @@ async def process_user_transactions_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "📊 View Stats")
-async def admin_btn_view_stats(message: Message):
+@dp.message(F.text == "📊 View Stats", StateFilter("*"))
+async def admin_btn_view_stats(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     async with db_pool.acquire() as conn:
         total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
         total_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks")
@@ -708,7 +707,7 @@ async def admin_btn_view_stats(message: Message):
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "🚫 Ban User")
+@dp.message(F.text == "🚫 Ban User", StateFilter("*"))
 async def admin_btn_ban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -737,7 +736,7 @@ async def process_ban_user_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "✅ Unban User")
+@dp.message(F.text == "✅ Unban User", StateFilter("*"))
 async def admin_btn_unban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -761,7 +760,7 @@ async def process_unban_user_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "📢 Broadcast")
+@dp.message(F.text == "📢 Broadcast", StateFilter("*"))
 async def admin_btn_broadcast(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -799,7 +798,7 @@ async def process_broadcast_step(message: Message, state: FSMContext):
     )
     await state.clear()
 
-@dp.message(F.text == "🏷 Update All Rewards")
+@dp.message(F.text == "🏷 Update All Rewards", StateFilter("*"))
 async def admin_btn_update_rewards(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -817,7 +816,7 @@ async def process_update_rewards_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid reward amount.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "🗑 Remove Task")
+@dp.message(F.text == "🗑 Remove Task", StateFilter("*"))
 async def admin_btn_remove_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -842,8 +841,8 @@ async def process_remove_task_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid Task ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(Command("mustjoin"))
-@dp.message(F.text == "📢 Must Join Channel")
+@dp.message(Command("mustjoin"), StateFilter("*"))
+@dp.message(F.text == "📢 Must Join Channel", StateFilter("*"))
 async def set_must_join_command(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -900,11 +899,11 @@ async def process_must_join_input(message: Message, state: FSMContext):
     await state.clear()
 
 # ============================================
-# BALANCE & LINK UPI / WITHDRAW SYSTEM
+# USER MENU BUTTONS (INTERRUPTS ALL STATES)
 # ============================================
 
-@dp.message(Command("balance"))
-@dp.message(F.text == "💰 Balance")
+@dp.message(Command("balance"), StateFilter("*"))
+@dp.message(F.text == "💰 Balance", StateFilter("*"))
 async def balance(message: Message, state: FSMContext):
     await state.clear()
     user_data = await get_user_data(message.from_user.id)
@@ -992,9 +991,10 @@ async def inline_withdraw_handler(call: CallbackQuery):
 # HISTORY
 # ============================================
 
-@dp.message(Command("history"))
-@dp.message(F.text == "📜 History")
-async def history(message: Message):
+@dp.message(Command("history"), StateFilter("*"))
+@dp.message(F.text == "📜 History", StateFilter("*"))
+async def history(message: Message, state: FSMContext):
+    await state.clear()
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", message.from_user.id)
     if not rows:
@@ -1010,8 +1010,8 @@ async def history(message: Message):
 # SELL SYSTEM
 # ============================================
 
-@dp.message(Command("sell"))
-@dp.message(F.text == "📨 Sell Gmail")
+@dp.message(Command("sell"), StateFilter("*"))
+@dp.message(F.text == "📨 Sell Gmail", StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling)
@@ -1051,7 +1051,6 @@ async def handle_sell(message: Message, state: FSMContext):
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your item has been sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
 
-# --- Database-driven Sell Approvals ---
 @dp.callback_query(F.data.startswith("sellapprove_db:"))
 async def approve_sell_db(call: CallbackQuery):
     _, sell_id_str, user_id_str, amount_str = call.data.split(":")
@@ -1180,10 +1179,11 @@ async def reject_withdraw(call: CallbackQuery):
 # SLASH COMMAND FALLBACKS (ADMIN SIDE)
 # ============================================
 
-@dp.message(Command("add"))
-async def add_balance(message: Message):
+@dp.message(Command("add"), StateFilter("*"))
+async def add_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     try:
         _, user_id, amount = message.text.split()
         user_id = int(user_id)
@@ -1198,10 +1198,11 @@ async def add_balance(message: Message):
     except Exception as e:
         await message.answer(f"Usage: /add USER_ID AMOUNT\nError: {e}")
 
-@dp.message(Command("cut"))
-async def cut_balance(message: Message):
+@dp.message(Command("cut"), StateFilter("*"))
+async def cut_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     try:
         _, user_id, amount = message.text.split()
         user_id = int(user_id)
@@ -1222,10 +1223,11 @@ async def cut_balance(message: Message):
     except Exception as e:
         await message.answer(f"Usage: /cut USER_ID AMOUNT\nError: {e}")
 
-@dp.message(Command("checkbal"))
-async def check_user_balance(message: Message, command: CommandObject):
+@dp.message(Command("checkbal"), StateFilter("*"))
+async def check_user_balance(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer("❌ Missing User ID!\n\nUsage: `/checkbal 123456789`", parse_mode=ParseMode.MARKDOWN)
         return
@@ -1240,10 +1242,11 @@ async def check_user_balance(message: Message, command: CommandObject):
     except ValueError:
         await message.answer("❌ Invalid User ID. Please provide a valid numeric ID.")
 
-@dp.message(Command("top"))
-async def top_balances(message: Message):
+@dp.message(Command("top"), StateFilter("*"))
+async def top_balances(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10")
 
@@ -1257,10 +1260,11 @@ async def top_balances(message: Message):
 
     await message.answer(text, parse_mode=ParseMode.MARKDOWN)
 
-@dp.message(Command("ban"))
-async def ban_user(message: Message, command: CommandObject):
+@dp.message(Command("ban"), StateFilter("*"))
+async def ban_user(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer("❌ Missing User ID!\n\nUsage: `/ban 123456789`", parse_mode=ParseMode.MARKDOWN)
         return
@@ -1282,10 +1286,11 @@ async def ban_user(message: Message, command: CommandObject):
     except ValueError:
         await message.answer("❌ Invalid User ID. Provide a numeric ID.")
 
-@dp.message(Command("unban"))
-async def unban_user(message: Message, command: CommandObject):
+@dp.message(Command("unban"), StateFilter("*"))
+async def unban_user(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer("❌ Missing User ID!\n\nUsage: `/unban 123456789`", parse_mode=ParseMode.MARKDOWN)
         return
@@ -1303,10 +1308,11 @@ async def unban_user(message: Message, command: CommandObject):
     except ValueError:
         await message.answer("❌ Invalid User ID. Provide a numeric ID.")
 
-@dp.message(Command("broadcast"))
-async def broadcast_message(message: Message, command: CommandObject):
+@dp.message(Command("broadcast"), StateFilter("*"))
+async def broadcast_message(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
 
     if not message.reply_to_message and not command.args:
         await message.answer(
@@ -1348,10 +1354,11 @@ async def broadcast_message(message: Message, command: CommandObject):
         f"👥 **Total:** {len(users)}"
     )
 
-@dp.message(Command("addtask"))
-async def add_task(message: Message, command: CommandObject):
+@dp.message(Command("addtask"), StateFilter("*"))
+async def add_task(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer("❌ Missing username!\n\nUsage: `/addtask philibertg1286`", parse_mode=ParseMode.MARKDOWN)
         return
@@ -1385,10 +1392,11 @@ async def add_task(message: Message, command: CommandObject):
     except Exception as e:
         await message.answer(f"❌ Error creating task: {str(e)}")
 
-@dp.message(Command("updateallrewards"))
-async def update_all_rewards(message: Message, command: CommandObject):
+@dp.message(Command("updateallrewards"), StateFilter("*"))
+async def update_all_rewards(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer(
             "❌ Missing reward amount!\n\nUsage:\n`/updateallrewards [New Reward]`\nExample: `/updateallrewards 40.0`",
@@ -1405,10 +1413,11 @@ async def update_all_rewards(message: Message, command: CommandObject):
     except Exception as e:
         await message.answer(f"❌ An error occurred: {str(e)}")
 
-@dp.message(Command("removetask"))
-async def remove_task(message: Message, command: CommandObject):
+@dp.message(Command("removetask"), StateFilter("*"))
+async def remove_task(message: Message, command: CommandObject, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not command.args:
         await message.answer("❌ Missing Task ID!\n\nUsage:\n`/removetask 3`", parse_mode=ParseMode.MARKDOWN)
         return
@@ -1429,11 +1438,11 @@ async def remove_task(message: Message, command: CommandObject):
         await message.answer(f"❌ An error occurred: {str(e)}")
 
 # ============================================
-# TASK ENGINE
+# TASK ENGINE (INTERRUPTS ALL STATES)
 # ============================================
 
-@dp.message(Command('task'))
-@dp.message(F.text == "✍️ Get Task")
+@dp.message(Command('task'), StateFilter("*"))
+@dp.message(F.text == "✍️ Get Task", StateFilter("*"))
 async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
@@ -1564,8 +1573,9 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 # Fallbacks for commands
-@dp.message(Command('submit'))
+@dp.message(Command('submit'), StateFilter("*"))
 async def fallback_submit(message: Message, state: FSMContext):
+    await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
@@ -1578,7 +1588,7 @@ async def fallback_submit(message: Message, state: FSMContext):
     await state.set_state(UserState.submitting_task)
     await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
-@dp.message(Command("cancel_task"))
+@dp.message(Command("cancel_task"), StateFilter("*"))
 async def fallback_cancel(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
