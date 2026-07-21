@@ -33,6 +33,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 db_pool = None
+BANNED_USERS_CACHE = set()
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER FREE TIER
@@ -61,7 +62,7 @@ class AdminState(StatesGroup):
     waiting_for_sell_reject_reason = State()
 
 # ============================================
-# DATABASE INITIALIZATION
+# DATABASE INITIALIZATION & CACHE
 # ============================================
 
 async def init_db():
@@ -127,6 +128,13 @@ async def init_db():
             )
         ''')
 
+async def load_banned_users_cache():
+    """Load banned users into memory at startup to eliminate DB middleware lag."""
+    global BANNED_USERS_CACHE
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id FROM banned_users")
+        BANNED_USERS_CACHE = {r['user_id'] for r in rows}
+
 # ============================================
 # HELPERS & KEYBOARDS
 # ============================================
@@ -145,9 +153,7 @@ async def get_balance(user_id: int) -> float:
     return data['balance'] if data else 0.0
 
 async def is_banned(user_id: int) -> bool:
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT 1 FROM banned_users WHERE user_id=$1", user_id)
-        return row is not None
+    return user_id in BANNED_USERS_CACHE
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
@@ -354,7 +360,7 @@ async def history(message: Message):
     if not rows:
         await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
         return
-    text = '<tg-emoji emoji-id="5197288647275071607">😀</tg-emoji> <b>Last Transactions</b>\n\n'
+    text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -591,6 +597,7 @@ async def ban_user(message: Message, command: CommandObject):
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
 
+        BANNED_USERS_CACHE.add(target_id)  # Update in-memory cache immediately
         await message.answer(f"🚫 **User `{target_id}` has been banned.**", parse_mode=ParseMode.MARKDOWN)
         try:
             await bot.send_message(target_id, "🚫 You have been banned from using this bot.")
@@ -611,6 +618,7 @@ async def unban_user(message: Message, command: CommandObject):
         async with db_pool.acquire() as conn:
             await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
 
+        BANNED_USERS_CACHE.discard(target_id)  # Update in-memory cache immediately
         await message.answer(f"✅ **User `{target_id}` has been unbanned.**", parse_mode=ParseMode.MARKDOWN)
         try:
             await bot.send_message(target_id, "🎉 Your ban has been lifted! You can now use the bot again.")
@@ -1061,6 +1069,7 @@ async def auto_expire_tasks():
 
 async def main():
     await init_db()
+    await load_banned_users_cache()
     asyncio.create_task(auto_expire_tasks())
     
     server_thread = Thread(target=run_flask)
