@@ -35,7 +35,7 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 
-# List of all menu buttons to prevent input bleeding
+# List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
@@ -45,8 +45,9 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER FREE TIER
+# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
 # ============================================
+
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -487,77 +488,6 @@ async def process_user_support_message(message: Message, state: FSMContext):
         reply_markup=get_main_menu_keyboard()
     )
     await state.clear()
-
-# ============================================
-# USER INLINE BALANCE & UPI / WITHDRAW SYSTEM
-# ============================================
-
-@dp.callback_query(F.data == "link_upi")
-async def start_link_upi(call: CallbackQuery, state: FSMContext):
-    try:
-        await call.answer()
-    except:
-        pass
-    await state.set_state(UserState.setting_upi)
-    await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
-
-@dp.callback_query(F.data == "inline_withdraw")
-async def inline_withdraw_handler(call: CallbackQuery):
-    user_data = await get_user_data(call.from_user.id)
-    bal = user_data['balance'] if user_data else 0.0
-    upi = user_data['upi'] if user_data else "None"
-
-    if upi == "None" or not upi:
-        try:
-            await call.answer("❌ Please link your UPI ID first before withdrawing!", show_alert=True)
-        except:
-            pass
-        return
-
-    MIN_WITHDRAW = 150.0
-    if bal < MIN_WITHDRAW:
-        try:
-            await call.answer(f"❌ Minimum withdrawal is ₹{MIN_WITHDRAW:.0f}. Current Balance: ₹{bal:.2f}", show_alert=True)
-        except:
-            pass
-        return
-
-    async with db_pool.acquire() as conn:
-        withdraw_id = await conn.fetchval(
-            'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
-            call.from_user.id, bal, upi
-        )
-
-    kb = InlineKeyboardBuilder()
-    kb.button(
-        text='Pay', 
-        callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}',
-        icon_custom_emoji_id="5444856076954520455",
-        style="success"
-    )
-    kb.button(
-        text='Reject', 
-        callback_data=f'reject:{withdraw_id}:{call.from_user.id}',
-        icon_custom_emoji_id="5274099962655816924",
-        style="danger"
-    )
-    
-    await bot.send_message(
-        ADMIN_ID,
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
-        reply_markup=kb.as_markup(),
-        parse_mode=ParseMode.HTML
-    )
-
-    try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
-        await call.answer()
-    except Exception as e:
-        print(f"Error editing withdraw msg: {e}")
 
 # ============================================
 # USER MENU BUTTONS (INTERRUPTS STATES)
@@ -1292,7 +1222,8 @@ async def start_link_upi(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "inline_withdraw")
 async def inline_withdraw_handler(call: CallbackQuery):
-    user_data = await get_user_data(call.from_user.id)
+    user_id = call.from_user.id
+    user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data else "None"
 
@@ -1312,21 +1243,33 @@ async def inline_withdraw_handler(call: CallbackQuery):
         return
 
     async with db_pool.acquire() as conn:
+        # Check if user already has an active/pending withdrawal
+        existing_pending = await conn.fetchrow(
+            "SELECT id FROM withdrawals WHERE user_id = $1 AND status = 'pending'",
+            user_id
+        )
+        if existing_pending:
+            try:
+                await call.answer("⚠️ You already have a pending withdrawal request! Please wait for it to be processed.", show_alert=True)
+            except:
+                pass
+            return
+
         withdraw_id = await conn.fetchval(
             'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
-            call.from_user.id, bal, upi
+            user_id, bal, upi
         )
 
     kb = InlineKeyboardBuilder()
     kb.button(
         text='Pay', 
-        callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}',
+        callback_data=f'pay:{withdraw_id}:{user_id}:{bal}',
         icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
     kb.button(
         text='Reject', 
-        callback_data=f'reject:{withdraw_id}:{call.from_user.id}',
+        callback_data=f'reject:{withdraw_id}:{user_id}',
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
@@ -1335,7 +1278,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
         ADMIN_ID,
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
         f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
@@ -1713,8 +1656,7 @@ async def auto_expire_tasks():
 
 async def main():
     await init_db()
-    await load_settings_and_cache()
-    asyncio.create_task(auto_expire_tasks())
+    await load_settings_and_cache()     asyncio.create_task(auto_expire_tasks())
     
     server_thread = Thread(target=run_flask)
     server_thread.daemon = True
