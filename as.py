@@ -591,7 +591,7 @@ async def balance(message: Message, state: FSMContext):
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
+        f'<tg-emoji emoji-id="6267167062292963117">🤑</tg-emoji> <b>UPI:</b> {upi}'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
