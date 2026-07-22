@@ -45,7 +45,7 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
+# DUMMY FLASK SERVER FOR RENDER FREE TIER
 # ============================================
 
 flask_app = Flask('')
@@ -229,7 +229,7 @@ def get_main_menu_keyboard():
     kb.button(text="💰 Balance", style="primary")
     kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
-    kb.button(text="🛠 Support", style="danger")
+    kb.button(text="🛠 Support", style="primary")
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
@@ -238,6 +238,7 @@ def get_admin_menu_keyboard():
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
+    kb.button(text="🗑 Unassign Tasks", style="danger")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -251,7 +252,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(3, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_unassign_inline_keyboard():
@@ -591,7 +592,7 @@ async def balance(message: Message, state: FSMContext):
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
-        f'<tg-emoji emoji-id="6267167062292963117">🤑</tg-emoji> <b>UPI:</b> {upi}'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
@@ -775,6 +776,58 @@ async def admin_btn_chat(message: Message, state: FSMContext):
         return
     await state.set_state(AdminState.waiting_for_chat_user_id)
     await message.answer("💬 Send the numeric **User ID** you want to message:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(F.text == "🗑 Unassign Tasks", StateFilter("*"))
+async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await message.answer(
+        "🗑 <b>Unassign Active Tasks</b>\n\n"
+        "Choose an option below:\n"
+        "• <b>User ID:</b> Unassign current active task of a specific user.\n"
+        "• <b>All Users:</b> Unassign all active tasks across all users and return them to the pool.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_unassign_inline_keyboard()
+    )
+
+@dp.callback_query(F.data == "unassign_by_user_id")
+async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminState.waiting_for_unassign_user_id)
+    await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
+    try:
+        await call.answer()
+    except:
+        pass
+
+@dp.callback_query(F.data == "unassign_all_users")
+async def process_unassign_all_users(call: CallbackQuery):
+    async with db_pool.acquire() as conn:
+        assigned_tasks = await conn.fetch('''
+            SELECT ta.task_id 
+            FROM task_assignments ta 
+            JOIN tasks t ON ta.task_id = t.id 
+            WHERE t.status = 'assigned'
+        ''')
+        
+        if not assigned_tasks:
+            try:
+                await call.answer("📭 No active assigned tasks found to unassign!", show_alert=True)
+            except:
+                pass
+            return
+
+        task_ids = [r['task_id'] for r in assigned_tasks]
+        
+        async with conn.transaction():
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
+            await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+
+    await edit_admin_message(call, f"✅ <b>Successfully unassigned {len(task_ids)} task(s) and returned them to the pool.</b>")
+    try:
+        await call.answer("Unassigned all tasks successfully!", show_alert=True)
+    except:
+        pass
 
 @dp.message(F.text == "➕ Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
@@ -1279,7 +1332,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
-        f'<tg-emoji emoji-id="6267167062292963117">🤑</tg-emoji> UPI: <code>{upi}</code>',
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
@@ -1614,7 +1667,7 @@ async def reject_withdraw(call: CallbackQuery):
         
     await edit_admin_message(call, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Withdrawal rejected.')
     try:
-        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
+        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_Mode=ParseMode.HTML)
     except:
         pass
 
