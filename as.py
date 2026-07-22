@@ -1243,7 +1243,6 @@ async def inline_withdraw_handler(call: CallbackQuery):
         return
 
     async with db_pool.acquire() as conn:
-        # Check if user already has an active/pending withdrawal
         existing_pending = await conn.fetchrow(
             "SELECT id FROM withdrawals WHERE user_id = $1 AND status = 'pending'",
             user_id
@@ -1656,7 +1655,8 @@ async def auto_expire_tasks():
 
 async def main():
     await init_db()
-    await load_settings_and_cache()     asyncio.create_task(auto_expire_tasks())
+    await load_settings_and_cache()
+    asyncio.create_task(auto_expire_tasks())
     
     server_thread = Thread(target=run_flask)
     server_thread.daemon = True
