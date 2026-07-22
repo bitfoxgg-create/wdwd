@@ -38,9 +38,9 @@ MUST_JOIN_CHANNEL = None
 # List of all menu buttons to prevent input bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "➕ Add Balance", "➖ Cut Balance",
-    "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", "📢 Broadcast",
-    "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
+    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
+    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
+    "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel"
 }
 
@@ -228,7 +228,7 @@ def get_main_menu_keyboard():
     kb.button(text="💰 Balance", style="primary")
     kb.button(text="📨 Sell Gmail", style="success")
     kb.button(text="📜 History", style="primary")
-    kb.button(text="🛠 Support", style="danger")
+    kb.button(text="🛠 Support", style="primary")
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
@@ -252,6 +252,23 @@ def get_admin_menu_keyboard():
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(3, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_unassign_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="👤 User ID", 
+        callback_data="unassign_by_user_id", 
+        icon_custom_emoji_id="5870458774455587120",
+        style="primary"
+    )
+    kb.button(
+        text="👥 All Users", 
+        callback_data="unassign_all_users", 
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    kb.adjust(2)
+    return kb.as_markup()
 
 def get_balance_inline_keyboard(upi_set: bool):
     kb = InlineKeyboardBuilder()
@@ -470,6 +487,77 @@ async def process_user_support_message(message: Message, state: FSMContext):
         reply_markup=get_main_menu_keyboard()
     )
     await state.clear()
+
+# ============================================
+# USER INLINE BALANCE & UPI / WITHDRAW SYSTEM
+# ============================================
+
+@dp.callback_query(F.data == "link_upi")
+async def start_link_upi(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except:
+        pass
+    await state.set_state(UserState.setting_upi)
+    await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
+
+@dp.callback_query(F.data == "inline_withdraw")
+async def inline_withdraw_handler(call: CallbackQuery):
+    user_data = await get_user_data(call.from_user.id)
+    bal = user_data['balance'] if user_data else 0.0
+    upi = user_data['upi'] if user_data else "None"
+
+    if upi == "None" or not upi:
+        try:
+            await call.answer("❌ Please link your UPI ID first before withdrawing!", show_alert=True)
+        except:
+            pass
+        return
+
+    MIN_WITHDRAW = 150.0
+    if bal < MIN_WITHDRAW:
+        try:
+            await call.answer(f"❌ Minimum withdrawal is ₹{MIN_WITHDRAW:.0f}. Current Balance: ₹{bal:.2f}", show_alert=True)
+        except:
+            pass
+        return
+
+    async with db_pool.acquire() as conn:
+        withdraw_id = await conn.fetchval(
+            'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
+            call.from_user.id, bal, upi
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text='Pay', 
+        callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}',
+        icon_custom_emoji_id="5444856076954520455",
+        style="success"
+    )
+    kb.button(
+        text='Reject', 
+        callback_data=f'reject:{withdraw_id}:{call.from_user.id}',
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    
+    await bot.send_message(
+        ADMIN_ID,
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
+        reply_markup=kb.as_markup(),
+        parse_mode=ParseMode.HTML
+    )
+
+    try:
+        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
+        await call.answer()
+    except Exception as e:
+        print(f"Error editing withdraw msg: {e}")
 
 # ============================================
 # USER MENU BUTTONS (INTERRUPTS STATES)
@@ -1192,6 +1280,73 @@ async def set_must_join_command(message: Message, state: FSMContext):
 # ============================================
 # USER INLINE SUBMIT & CANCEL SYSTEM
 # ============================================
+
+@dp.callback_query(F.data == "link_upi")
+async def start_link_upi(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except:
+        pass
+    await state.set_state(UserState.setting_upi)
+    await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
+
+@dp.callback_query(F.data == "inline_withdraw")
+async def inline_withdraw_handler(call: CallbackQuery):
+    user_data = await get_user_data(call.from_user.id)
+    bal = user_data['balance'] if user_data else 0.0
+    upi = user_data['upi'] if user_data else "None"
+
+    if upi == "None" or not upi:
+        try:
+            await call.answer("❌ Please link your UPI ID first before withdrawing!", show_alert=True)
+        except:
+            pass
+        return
+
+    MIN_WITHDRAW = 150.0
+    if bal < MIN_WITHDRAW:
+        try:
+            await call.answer(f"❌ Minimum withdrawal is ₹{MIN_WITHDRAW:.0f}. Current Balance: ₹{bal:.2f}", show_alert=True)
+        except:
+            pass
+        return
+
+    async with db_pool.acquire() as conn:
+        withdraw_id = await conn.fetchval(
+            'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
+            call.from_user.id, bal, upi
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text='Pay', 
+        callback_data=f'pay:{withdraw_id}:{call.from_user.id}:{bal}',
+        icon_custom_emoji_id="5444856076954520455",
+        style="success"
+    )
+    kb.button(
+        text='Reject', 
+        callback_data=f'reject:{withdraw_id}:{call.from_user.id}',
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    
+    await bot.send_message(
+        ADMIN_ID,
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{call.from_user.id}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
+        reply_markup=kb.as_markup(),
+        parse_mode=ParseMode.HTML
+    )
+
+    try:
+        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
+        await call.answer()
+    except Exception as e:
+        print(f"Error editing withdraw msg: {e}")
 
 @dp.callback_query(F.data == "user_submit_task")
 async def inline_submit_task(call: CallbackQuery, state: FSMContext):
