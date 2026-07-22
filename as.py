@@ -1279,7 +1279,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
+        f'<tg-emoji emoji-id="6267167062292963117">🤑</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
