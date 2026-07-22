@@ -38,14 +38,14 @@ MUST_JOIN_CHANNEL = None
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "➕ Add Balance", 
+    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel"
 }
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER FREE TIER
+# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
 # ============================================
 
 flask_app = Flask('')
@@ -87,6 +87,7 @@ class AdminState(StatesGroup):
     waiting_for_chat_user_id = State()
     waiting_for_chat_message = State()
     waiting_for_unassign_user_id = State()
+    waiting_for_find_id_query = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -239,6 +240,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💬 Chat", style="primary")
     kb.button(text="🗑 Unassign Tasks", style="danger")
+    kb.button(text="🔍 Find ID", style="primary")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -252,7 +254,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 3, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_unassign_inline_keyboard():
@@ -791,6 +793,17 @@ async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
         reply_markup=get_unassign_inline_keyboard()
     )
 
+@dp.message(F.text == "🔍 Find ID", StateFilter("*"))
+async def admin_btn_find_id(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_find_id_query)
+    await message.answer(
+        "🔍 <b>Find Task & User ID</b>\n\n"
+        "Please send the Gmail username (e.g., <code>jhon</code> without @gmail.com):",
+        parse_mode=ParseMode.HTML
+    )
+
 @dp.callback_query(F.data == "unassign_by_user_id")
 async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
     await state.set_state(AdminState.waiting_for_unassign_user_id)
@@ -955,6 +968,41 @@ async def set_must_join_command(message: Message, state: FSMContext):
 # ============================================
 # INPUT PROCESSORS FOR STATES (FILTER OUT BUTTON CLICKS)
 # ============================================
+
+@dp.message(AdminState.waiting_for_find_id_query, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_find_id_step(message: Message, state: FSMContext):
+    query = message.text.strip().lower()
+    search_term = f"%{query}%"
+
+    async with db_pool.acquire() as conn:
+        task = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.status, ta.user_id 
+            FROM tasks t
+            LEFT JOIN task_assignments ta ON t.id = ta.task_id
+            WHERE LOWER(t.title) LIKE $1 OR LOWER(t.details) LIKE $1
+            LIMIT 1
+        ''', search_term)
+
+    if not task:
+        await message.answer(f"❌ No task found matching username query: <code>{query}</code>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    task_id = task['id']
+    status = task['status']
+    assigned_user_id = task['user_id']
+    user_str = f"<code>{assigned_user_id}</code>" if assigned_user_id else "<i>None (Unassigned)</i>"
+
+    text = (
+        f"🔍 <b>Task Lookup Result</b>\n\n"
+        f"📌 <b>Task ID:</b> <code>#{task_id}</code>\n"
+        f"📊 <b>Status:</b> <code>{status}</code>\n"
+        f"👤 <b>Assigned User ID:</b> {user_str}\n"
+        f"📄 <b>Details:</b> <code>{task['details']}</code>"
+    )
+
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    await state.clear()
 
 @dp.message(AdminState.waiting_for_unassign_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_unassign_user_id_step(message: Message, state: FSMContext):
@@ -1667,7 +1715,7 @@ async def reject_withdraw(call: CallbackQuery):
         
     await edit_admin_message(call, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Withdrawal rejected.')
     try:
-        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_Mode=ParseMode.HTML)
+        await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
         pass
 
