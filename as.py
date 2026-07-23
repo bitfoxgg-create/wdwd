@@ -319,11 +319,13 @@ def get_support_cancel_keyboard():
         )
     ]])
 
-async def edit_admin_message(call: CallbackQuery, new_text: str):
+async def edit_admin_message(call: CallbackQuery, additional_text: str):
     try:
         if call.message.photo:
-            await call.message.edit_caption(caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+            new_caption = (call.message.caption or "") + "\n\n" + additional_text
+            await call.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
+            new_text = (call.message.text or "") + "\n\n" + additional_text
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
@@ -836,7 +838,7 @@ async def process_unassign_all_users(call: CallbackQuery):
             await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
             await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
 
-    await edit_admin_message(call, f"✅ <b>Successfully unassigned {len(task_ids)} task(s) and returned them to the pool.</b>")
+    await edit_admin_message(call, "✅ <b>Successfully unassigned task(s) and returned them to the pool.</b>")
     try:
         await call.answer("Unassigned all tasks successfully!", show_alert=True)
     except:
@@ -1506,7 +1508,7 @@ async def approve_sell_unified(call: CallbackQuery):
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
             await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
-    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Sell request approved and balance credited.')
+    await edit_admin_message(call, '✅ Sell Request Approved')
     try:
         await bot.send_message(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+₹{amount} added to your balance.")
     except:
@@ -1598,7 +1600,7 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
             
-    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task approved and balance credited.')
+    await edit_admin_message(call, '✅ Task Approved')
     try:
         await bot.send_message(user_id, f"🎉 Task approved!\n+₹{reward} added to your balance.")
     except Exception as e:
@@ -1690,7 +1692,7 @@ async def pay_withdraw(call: CallbackQuery):
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
             
-    await edit_admin_message(call, '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Withdrawal marked as paid.')
+    await edit_admin_message(call, '✅ Withdrawal Paid')
     try:
         await bot.send_message(user_id, f"🎉 Withdrawal of ₹{amount} has been paid.")
     except:
@@ -1713,7 +1715,7 @@ async def reject_withdraw(call: CallbackQuery):
 
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
         
-    await edit_admin_message(call, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Withdrawal rejected.')
+    await edit_admin_message(call, '⚠️ Withdrawal Rejected')
     try:
         await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
