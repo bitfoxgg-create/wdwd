@@ -24,8 +24,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 # CONFIGURATION & INITIALIZATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
+BOT_TOKEN = os.environ.get('BOT_TOKEN', '8945637469:AAHeA53wCzahGMJzTsDyioY-g_3YssAr22g')
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 8665754583))
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 bot = Bot(token=BOT_TOKEN)
@@ -160,7 +160,7 @@ async def init_db():
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
                 details TEXT,
-                amount DOUBLE PRECISION DEFAULT 30.0,
+                amount DOUBLE PRECISION DEFAULT 50.0,
                 status TEXT DEFAULT 'pending_review',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -226,11 +226,26 @@ def get_must_join_keyboard():
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    kb.button(text="✍️ Get Task", style="success")
-    kb.button(text="💰 Balance", style="primary")
-    kb.button(text="📨 Sell Gmail", style="success")
-    kb.button(text="📜 History", style="primary")
-    kb.button(text="🛠 Support", style="danger")
+    kb.button(
+        text="Get Task",
+        icon_custom_emoji_id="5197269100878907942"
+    )
+    kb.button(
+        text="Balance",
+        icon_custom_emoji_id="5417924076503062111"
+    )
+    kb.button(
+        text="Sell Gmail",
+        icon_custom_emoji_id="5377548235709619284"
+    )
+    kb.button(
+        text="History",
+        icon_custom_emoji_id="5008025248314950702"
+    )
+    kb.button(
+        text="Support",
+        icon_custom_emoji_id="5274099962655816924"
+    )
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
@@ -319,13 +334,15 @@ def get_support_cancel_keyboard():
         )
     ]])
 
-async def edit_admin_message(call: CallbackQuery, additional_text: str):
+async def edit_admin_message(call: CallbackQuery, approval_text: str):
     try:
+        emoji_tag = '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji>' if "Approved" in approval_text or "Paid" in approval_text else '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji>'
+        formatted_status = f"{emoji_tag} <b>{approval_text}</b>"
         if call.message.photo:
-            new_caption = (call.message.caption or "") + "\n\n" + additional_text
+            new_caption = (call.message.caption or "") + "\n\n" + formatted_status
             await call.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
-            new_text = (call.message.text or "") + "\n\n" + additional_text
+            new_text = (call.message.text or "") + "\n\n" + formatted_status
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
@@ -423,8 +440,8 @@ async def start(message: Message, state: FSMContext):
     text = (
         '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
         '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
-        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
-        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) 📨\n'
+        '• <b>Get Task:</b> Receive a new task (65₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
+        '• <b>Sell Gmail:</b> Sell old accounts (50₹/ Gmail) 📨\n'
         '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
     )
     
@@ -445,7 +462,7 @@ async def return_to_main_menu(message: Message, state: FSMContext):
 # SUPPORT SYSTEM
 # ============================================
 
-@dp.message(F.text == "🛠 Support", StateFilter("*"))
+@dp.message(F.text == "Support", StateFilter("*"))
 async def support_button_handler(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.waiting_for_support)
@@ -499,7 +516,7 @@ async def process_user_support_message(message: Message, state: FSMContext):
 # ============================================
 
 @dp.message(Command('task'), StateFilter("*"))
-@dp.message(F.text == "✍️ Get Task", StateFilter("*"))
+@dp.message(F.text == "Get Task", StateFilter("*"))
 async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
@@ -535,7 +552,7 @@ async def get_task(message: Message, state: FSMContext):
                     password = parts[1].replace("Pass: ", "").strip()
                 except:
                     username = existing['title'].replace("Login to ", "")
-                    password = "See Admin"
+                    password = "Bloody@123"
 
                 await message.answer(
                     f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
@@ -573,7 +590,7 @@ async def get_task(message: Message, state: FSMContext):
         password = parts[1].replace("Pass: ", "").strip()
     except:
         username = title.replace("Login to ", "")
-        password = "See Admin"
+        password = "Bloody@123"
 
     await message.answer(
         f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
@@ -585,7 +602,7 @@ async def get_task(message: Message, state: FSMContext):
     )
 
 @dp.message(Command("balance"), StateFilter("*"))
-@dp.message(F.text == "💰 Balance", StateFilter("*"))
+@dp.message(F.text == "Balance", StateFilter("*"))
 async def balance(message: Message, state: FSMContext):
     await state.clear()
     user_data = await get_user_data(message.from_user.id)
@@ -602,7 +619,7 @@ async def balance(message: Message, state: FSMContext):
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
 
 @dp.message(Command("sell"), StateFilter("*"))
-@dp.message(F.text == "📨 Sell Gmail", StateFilter("*"))
+@dp.message(F.text == "Sell Gmail", StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
@@ -627,7 +644,7 @@ async def process_sell_password(message: Message, state: FSMContext):
     data = await state.get_data()
     username = data.get('sell_username')
     user_id = message.from_user.id
-    rate = 30.0
+    rate = 50.0
 
     details = f"Username: {username}\nPassword: {password}"
 
@@ -666,7 +683,7 @@ async def process_sell_password(message: Message, state: FSMContext):
     await state.clear()
 
 @dp.message(Command("history"), StateFilter("*"))
-@dp.message(F.text == "📜 History", StateFilter("*"))
+@dp.message(F.text == "History", StateFilter("*"))
 async def history(message: Message, state: FSMContext):
     await state.clear()
     async with db_pool.acquire() as conn:
@@ -1084,8 +1101,8 @@ async def process_chat_message_step(message: Message, state: FSMContext):
 async def process_add_task_step(message: Message, state: FSMContext):
     username_input = message.text.strip()
     username = f"{username_input}@gmail.com" if "@" not in username_input else username_input
-    password = "TaskVerse@#"
-    default_reward = 50.0 
+    password = "Bloody@123"
+    default_reward = 65.0 
     title = f"Login to {username}"
     details = f"Email: {username} | Pass: {password}"
     
@@ -1719,7 +1736,7 @@ async def reject_withdraw(call: CallbackQuery):
     try:
         await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
-        pass
+5        pass
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
