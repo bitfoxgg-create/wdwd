@@ -227,7 +227,7 @@ def get_must_join_keyboard():
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(
-        text="Get Task",
+        text="✍️ Get Task",
         icon_custom_emoji_id="5197269100878907942",
         style="success"
     )
