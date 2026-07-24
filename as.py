@@ -461,13 +461,8 @@ async def start(message: Message, state: FSMContext):
     await ensure_user(message.from_user.id)
     
     text = (
-        '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji emoji-id="5287684458881756303">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
-        '• <b>Get Task:</b> Receive a New Task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
-        '• <b>Sell Gmail:</b> Sell Old Accounts (30₹/ Gmail) <tg-emoji emoji-id="5307602416961609760">✍️</tg-emoji>\n'
-        '• <b>Balance:</b> Check Wallet Balance & Withdraw Funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
-        '• <b>History:</b> Check Your Transactions <tg-emoji emoji-id="5253742260054409879">💰</tg-emoji>\n'
-        '• <b>Balance:</b> Send A Help Message To Admin <tg-emoji emoji-id="5443038326535759644">💰</tg-emoji>\n'
+        '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+        'Choose an option from the menu below:'
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -491,11 +486,8 @@ async def return_to_main_menu(message: Message, state: FSMContext):
 async def cb_menu_back(call: CallbackQuery, state: FSMContext):
     await state.clear()
     text = (
-        '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
-        '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
-        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
-        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) 📨\n'
-        '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
+        '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+        'Choose an option from the menu below:'
     )
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
@@ -647,7 +639,7 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
             await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
         await call.answer()
         return
-    text = '<tg-emoji emoji-id="<tg-emoji emoji-id="5440410042773824003">🔗</tg-emoji>">😀</tg-emoji> <b>Last Transactions</b>\n\n'
+    text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -902,7 +894,7 @@ async def history(message: Message, state: FSMContext):
     if not rows:
         await message.answer("📭 No transactions found.", reply_markup=get_back_inline_keyboard())
         return
-    text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
+    text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
