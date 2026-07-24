@@ -41,7 +41,7 @@ MENU_BUTTONS = {
     "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel"
+    "📢 Must Join Channel", "Get Task", "Balance", "Sell Gmail", "History", "Support"
 }
 
 # ============================================
@@ -1736,7 +1736,7 @@ async def reject_withdraw(call: CallbackQuery):
     try:
         await bot.send_message(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
     except:
-5        pass
+        pass
 
 # ============================================
 # AUTO EXPIRE TASKS ENGINE
