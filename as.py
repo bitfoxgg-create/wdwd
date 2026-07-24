@@ -318,8 +318,7 @@ def get_balance_inline_keyboard(upi_set: bool):
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="5206607081334906820",
-        style="danger"
+        icon_custom_emoji_id="6039539366177541657"
     )
     kb.adjust(2, 1)
     return kb.as_markup()
@@ -329,8 +328,7 @@ def get_back_inline_keyboard():
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="5206607081334906820",
-        style="danger"
+        icon_custom_emoji_id="6039539366177541657"
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -352,14 +350,14 @@ def get_task_action_keyboard():
     ]])
 
 def get_support_cancel_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="Back", 
-            callback_data="menu_back", 
-            icon_custom_emoji_id="5274099962655816924",
-            style="danger"
-        )
-    ]])
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="Back", 
+        callback_data="menu_back", 
+        icon_custom_emoji_id="6039539366177541657"
+    )
+    kb.adjust(1)
+    return kb.as_markup()
 
 async def edit_admin_message(call: CallbackQuery, additional_text: str):
     try:
