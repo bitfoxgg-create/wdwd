@@ -315,7 +315,24 @@ def get_balance_inline_keyboard(upi_set: bool):
         icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
-    kb.adjust(1, 1)
+    kb.button(
+        text="Back",
+        callback_data="menu_back",
+        icon_custom_emoji_id="5206607081334906820",
+        style="danger"
+    )
+    kb.adjust(2, 1)
+    return kb.as_markup()
+
+def get_back_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="Back",
+        callback_data="menu_back",
+        icon_custom_emoji_id="5206607081334906820",
+        style="danger"
+    )
+    kb.adjust(1)
     return kb.as_markup()
 
 def get_task_action_keyboard():
@@ -337,8 +354,8 @@ def get_task_action_keyboard():
 def get_support_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="Cancel", 
-            callback_data="cancel_support", 
+            text="Back", 
+            callback_data="menu_back", 
             icon_custom_emoji_id="5274099962655816924",
             style="danger"
         )
@@ -470,6 +487,22 @@ async def return_to_main_menu(message: Message, state: FSMContext):
 # INLINE MAIN MENU CALLBACK HANDLERS
 # ============================================
 
+@dp.callback_query(F.data == "menu_back")
+async def cb_menu_back(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    text = (
+        '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> <b>Gmail EarneX Wallet Bot</b>\n\n'
+        '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Use the buttons below to operate the bot:</b>\n\n'
+        '• <b>Get Task:</b> Receive a new task (50₹/ Gmail) <tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji>\n'
+        '• <b>Sell Gmail:</b> Sell old accounts (30₹/ Gmail) 📨\n'
+        '• <b>Balance:</b> Check wallet balance & withdraw funds <tg-emoji emoji-id="5417924076503062111">💰</tg-emoji>\n'
+    )
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    except:
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    await call.answer()
+
 @dp.callback_query(F.data == "menu_get_task")
 async def cb_get_task(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -579,8 +612,9 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     upi_set = upi != "None" and upi != ""
     
     text = (
-        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
+        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
+        f'<b>Available:</b> ₹{bal:.2f}\n'
+        f'<b>UPI:</b> <code>{upi}</code>'
     )
     
     try:
@@ -595,9 +629,9 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.selling_username)
     txt = '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):'
     try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML)
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML)
+        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await call.answer()
 
 @dp.callback_query(F.data == "menu_history")
@@ -608,9 +642,9 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
     if not rows:
         txt = "📭 No transactions found."
         try:
-            await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
+            await call.message.edit_text(txt, reply_markup=get_back_inline_keyboard())
         except:
-            await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
+            await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
         await call.answer()
         return
     text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
@@ -619,9 +653,9 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
     try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await call.answer()
 
 @dp.callback_query(F.data == "menu_support")
@@ -801,7 +835,8 @@ async def sell(message: Message, state: FSMContext):
     await state.set_state(UserState.selling_username)
     await message.answer(
         '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):',
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_back_inline_keyboard()
     )
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -811,7 +846,8 @@ async def process_sell_username(message: Message, state: FSMContext):
     await state.set_state(UserState.selling_password)
     await message.answer(
         '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the **Password** for this Gmail account:',
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_back_inline_keyboard()
     )
 
 @dp.message(UserState.selling_password, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -864,13 +900,13 @@ async def history(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", message.from_user.id)
     if not rows:
-        await message.answer("📭 No transactions found.", reply_markup=get_main_menu_keyboard())
+        await message.answer("📭 No transactions found.", reply_markup=get_back_inline_keyboard())
         return
     text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
 
 # ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
