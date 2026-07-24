@@ -41,7 +41,7 @@ MENU_BUTTONS = {
     "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "Get Task", "Balance", "Sell Gmail", "History", "Support"
+    "📢 Must Join Channel"
 }
 
 # ============================================
@@ -226,26 +226,11 @@ def get_must_join_keyboard():
 
 def get_main_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    kb.button(
-        text="Get Task",
-        icon_custom_emoji_id="5197269100878907942"
-    )
-    kb.button(
-        text="Balance",
-        icon_custom_emoji_id="5417924076503062111"
-    )
-    kb.button(
-        text="Sell Gmail",
-        icon_custom_emoji_id="5377548235709619284"
-    )
-    kb.button(
-        text="History",
-        icon_custom_emoji_id="5008025248314950702"
-    )
-    kb.button(
-        text="Support",
-        icon_custom_emoji_id="5274099962655816924"
-    )
+    kb.button(text="✍️ Get Task", style="success")
+    kb.button(text="💰 Balance", style="primary")
+    kb.button(text="📨 Sell Gmail", style="success")
+    kb.button(text="📜 History", style="primary")
+    kb.button(text="🛠 Support", style="danger")
     kb.adjust(2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
@@ -336,13 +321,11 @@ def get_support_cancel_keyboard():
 
 async def edit_admin_message(call: CallbackQuery, approval_text: str):
     try:
-        emoji_tag = '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji>' if "Approved" in approval_text or "Paid" in approval_text else '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji>'
-        formatted_status = f"{emoji_tag} <b>{approval_text}</b>"
         if call.message.photo:
-            new_caption = (call.message.caption or "") + "\n\n" + formatted_status
+            new_caption = (call.message.caption or "") + "\n\n" + approval_text
             await call.message.edit_caption(caption=new_caption, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
-            new_text = (call.message.text or "") + "\n\n" + formatted_status
+            new_text = (call.message.text or "") + "\n\n" + approval_text
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
@@ -462,7 +445,7 @@ async def return_to_main_menu(message: Message, state: FSMContext):
 # SUPPORT SYSTEM
 # ============================================
 
-@dp.message(F.text == "Support", StateFilter("*"))
+@dp.message(F.text == "🛠 Support", StateFilter("*"))
 async def support_button_handler(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.waiting_for_support)
@@ -516,7 +499,7 @@ async def process_user_support_message(message: Message, state: FSMContext):
 # ============================================
 
 @dp.message(Command('task'), StateFilter("*"))
-@dp.message(F.text == "Get Task", StateFilter("*"))
+@dp.message(F.text == "✍️ Get Task", StateFilter("*"))
 async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
@@ -602,7 +585,7 @@ async def get_task(message: Message, state: FSMContext):
     )
 
 @dp.message(Command("balance"), StateFilter("*"))
-@dp.message(F.text == "Balance", StateFilter("*"))
+@dp.message(F.text == "💰 Balance", StateFilter("*"))
 async def balance(message: Message, state: FSMContext):
     await state.clear()
     user_data = await get_user_data(message.from_user.id)
@@ -619,7 +602,7 @@ async def balance(message: Message, state: FSMContext):
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
 
 @dp.message(Command("sell"), StateFilter("*"))
-@dp.message(F.text == "Sell Gmail", StateFilter("*"))
+@dp.message(F.text == "📨 Sell Gmail", StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
@@ -683,7 +666,7 @@ async def process_sell_password(message: Message, state: FSMContext):
     await state.clear()
 
 @dp.message(Command("history"), StateFilter("*"))
-@dp.message(F.text == "History", StateFilter("*"))
+@dp.message(F.text == "📜 History", StateFilter("*"))
 async def history(message: Message, state: FSMContext):
     await state.clear()
     async with db_pool.acquire() as conn:
