@@ -619,7 +619,10 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
 async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
-    txt = '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):'
+    txt = (
+        '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/Gmail</b>\n\n'
+        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
+    )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except:
@@ -826,7 +829,8 @@ async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
     await message.answer(
-        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):',
+        '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/Gmail</b>\n\n'
+        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):',
         parse_mode=ParseMode.HTML,
         reply_markup=get_back_inline_keyboard()
     )
@@ -837,7 +841,7 @@ async def process_sell_username(message: Message, state: FSMContext):
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
     await message.answer(
-        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the **Password** for this Gmail account:',
+        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the <b>Password</b> for this Gmail account:',
         parse_mode=ParseMode.HTML,
         reply_markup=get_back_inline_keyboard()
     )
