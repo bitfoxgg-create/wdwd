@@ -457,6 +457,14 @@ async def user_left_channel(event: ChatMemberUpdated):
 
 @dp.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext):
+    data = await state.get_data()
+    last_msg_id = data.get("last_menu_msg_id")
+    if last_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=last_msg_id)
+        except Exception:
+            pass
+
     await state.clear()
     await ensure_user(message.from_user.id)
     
@@ -465,18 +473,21 @@ async def start(message: Message, state: FSMContext):
         'Choose an option from the menu below:'
     )
     
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("cancel"), StateFilter("*"))
 @dp.message(F.text == "🚫 Cancel", StateFilter("*"))
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    sent_msg = await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(F.text == "🏠 Main Menu", StateFilter("*"))
 async def return_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+    sent_msg = await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # INLINE MAIN MENU CALLBACK HANDLERS
@@ -492,7 +503,10 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        sent_msg = await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        await state.update_data(last_menu_msg_id=sent_msg.message_id)
+    else:
+        await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_get_task")
@@ -518,6 +532,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                 except:
                     await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                await state.update_data(last_menu_msg_id=call.message.message_id)
                 await call.answer()
                 return
 
@@ -549,6 +564,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
                 except:
                     await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                await state.update_data(last_menu_msg_id=call.message.message_id)
                 await call.answer()
                 return
             else:
@@ -563,6 +579,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                 await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
             except:
                 await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
+            await state.update_data(last_menu_msg_id=call.message.message_id)
             await call.answer()
             return
         
@@ -593,6 +610,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_balance")
@@ -613,6 +631,7 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
     except Exception:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_sell_gmail")
@@ -627,6 +646,7 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_history")
@@ -640,6 +660,7 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
             await call.message.edit_text(txt, reply_markup=get_back_inline_keyboard())
         except:
             await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
+        await state.update_data(last_menu_msg_id=call.message.message_id)
         await call.answer()
         return
     text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
@@ -651,6 +672,7 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_support")
@@ -665,6 +687,7 @@ async def cb_support(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 # ============================================
@@ -675,12 +698,13 @@ async def cb_support(call: CallbackQuery, state: FSMContext):
 async def support_button_handler(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.waiting_for_support)
-    await message.answer(
+    sent_msg = await message.answer(
         "🛠 <b>Customer Support</b>\n\n"
         "Please send your help message or describe your issue below. Our admin team will look into it shortly.",
         parse_mode=ParseMode.HTML,
         reply_markup=get_support_cancel_keyboard()
     )
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.callback_query(F.data == "cancel_support")
 async def cancel_support_callback(call: CallbackQuery, state: FSMContext):
@@ -689,7 +713,8 @@ async def cancel_support_callback(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text("❌ Support request cancelled.", reply_markup=None)
     except:
         pass
-    await call.message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+    sent_msg = await call.message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     try:
         await call.answer()
     except:
@@ -713,12 +738,13 @@ async def process_user_support_message(message: Message, state: FSMContext):
     except Exception as e:
         print(f"Failed to forward support message to admin: {e}")
 
-    await message.answer(
+    sent_msg = await message.answer(
         "✅ <b>Your help message has been sent directly to the admin!</b> We will get back to you soon.",
         parse_mode=ParseMode.HTML,
         reply_markup=get_main_menu_keyboard()
     )
     await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # USER MENU ACTIONS (COMMAND FALLBACKS)
@@ -742,7 +768,8 @@ async def get_task(message: Message, state: FSMContext):
             task_status = existing['status']
             
             if task_status == 'pending_review':
-                await message.answer('<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                sent_msg = await message.answer('<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                await state.update_data(last_menu_msg_id=sent_msg.message_id)
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
@@ -761,7 +788,7 @@ async def get_task(message: Message, state: FSMContext):
                     username = existing['title'].replace("Login to ", "")
                     password = "See Admin"
 
-                await message.answer(
+                sent_msg = await message.answer(
                     f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
                     f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
                     f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
@@ -771,6 +798,7 @@ async def get_task(message: Message, state: FSMContext):
                     parse_mode=ParseMode.HTML,
                     reply_markup=get_task_action_keyboard()
                 )
+                await state.update_data(last_menu_msg_id=sent_msg.message_id)
                 return
             else:
                 async with conn.transaction():
@@ -779,7 +807,8 @@ async def get_task(message: Message, state: FSMContext):
 
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
-            await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
+            sent_msg = await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
+            await state.update_data(last_menu_msg_id=sent_msg.message_id)
             return
         
         task_id = task['id']
@@ -799,7 +828,7 @@ async def get_task(message: Message, state: FSMContext):
         username = title.replace("Login to ", "")
         password = "See Admin"
 
-    await message.answer(
+    sent_msg = await message.answer(
         f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}\n\n'
@@ -807,6 +836,7 @@ async def get_task(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML, 
         reply_markup=get_task_action_keyboard()
     )
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("balance"), StateFilter("*"))
 async def balance(message: Message, state: FSMContext):
@@ -822,29 +852,32 @@ async def balance(message: Message, state: FSMContext):
         f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
     )
     
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("sell"), StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
-    await message.answer(
+    sent_msg = await message.answer(
         '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/Gmail</b>\n\n'
         '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):',
         parse_mode=ParseMode.HTML,
         reply_markup=get_back_inline_keyboard()
     )
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
     username = message.text.strip()
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
-    await message.answer(
+    sent_msg = await message.answer(
         '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the <b>Password</b> for this Gmail account:',
         parse_mode=ParseMode.HTML,
         reply_markup=get_back_inline_keyboard()
     )
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(UserState.selling_password, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_password(message: Message, state: FSMContext):
@@ -882,13 +915,14 @@ async def process_sell_password(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML
     )
 
-    await message.answer(
+    sent_msg = await message.answer(
         '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your account details have been sent for admin review.\n\n'
         '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
     )
     await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("history"), StateFilter("*"))
 async def history(message: Message, state: FSMContext):
@@ -896,13 +930,15 @@ async def history(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", message.from_user.id)
     if not rows:
-        await message.answer("📭 No transactions found.", reply_markup=get_back_inline_keyboard())
+        sent_msg = await message.answer("📭 No transactions found.", reply_markup=get_back_inline_keyboard())
+        await state.update_data(last_menu_msg_id=sent_msg.message_id)
         return
     text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
@@ -1277,8 +1313,9 @@ async def process_link_upi(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET upi=$1 WHERE user_id=$2", upi_input, message.from_user.id)
 
-    await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your UPI ID has been linked to: <code>{upi_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    sent_msg = await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your UPI ID has been linked to: <code>{upi_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(AdminState.waiting_for_chat_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_chat_user_id_step(message: Message, state: FSMContext):
@@ -1671,7 +1708,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
         task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
     if not task:
         await state.clear()
-        await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
+        sent_msg = await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
+        await state.update_data(last_menu_msg_id=sent_msg.message_id)
         return
     
     task_id = task['id']
@@ -1689,8 +1727,10 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
     else:
         await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
-    await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    
+    sent_msg = await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # UNIFIED SELL APPROVE & DECLINE HANDLERS
