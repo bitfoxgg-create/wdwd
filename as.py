@@ -623,8 +623,8 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
-        f'<b>Available:</b> ₹{bal:.2f}\n'
-        f'<b>UPI:</b> <code>{upi}</code>'
+        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji><b>Available:</b> ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji><b>UPI:</b> <code>{upi}</code>'
     )
     
     try:
@@ -639,8 +639,8 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
     txt = (
-        '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/ Gmail</b>\n\n'
-        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g: <code>example@gmail.com</code>):'
+        '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/Gmail</b>\n\n'
+        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
@@ -848,8 +848,9 @@ async def balance(message: Message, state: FSMContext):
     upi_set = upi != "None" and upi != ""
     
     text = (
-        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
+        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
+        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji><b>Available:</b> ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji><b>UPI:</b> <code>{upi}</code>'
     )
     
     sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
