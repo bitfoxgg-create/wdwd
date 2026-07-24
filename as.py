@@ -472,27 +472,170 @@ async def return_to_main_menu(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "menu_get_task")
 async def cb_get_task(call: CallbackQuery, state: FSMContext):
-    await get_task(call.message, state)
+    await state.clear()
+    user_id = call.from_user.id
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at 
+            FROM task_assignments a
+            JOIN tasks t ON a.task_id = t.id
+            WHERE a.user_id=$1
+        ''', user_id)
+        
+        if existing:
+            task_id = existing['id']
+            assigned_time = existing['assigned_at']
+            task_status = existing['status']
+            
+            if task_status == 'pending_review':
+                txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.'
+                try:
+                    await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                except:
+                    await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                await call.answer()
+                return
+
+            expire_time = assigned_time + timedelta(minutes=30)
+            remaining = expire_time - datetime.utcnow()
+            total_seconds = int(remaining.total_seconds())
+            
+            if total_seconds > 0:
+                mins = total_seconds // 60
+                secs = total_seconds % 60
+                
+                try:
+                    parts = existing['details'].split(" | ")
+                    username = parts[0].replace("Email: ", "").strip()
+                    password = parts[1].replace("Pass: ", "").strip()
+                except:
+                    username = existing['title'].replace("Login to ", "")
+                    password = "See Admin"
+
+                txt = (
+                    f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
+                    f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
+                    f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
+                    f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+                    f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{existing["reward"]}\n\n'
+                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s'
+                )
+                try:
+                    await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                except:
+                    await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                await call.answer()
+                return
+            else:
+                async with conn.transaction():
+                    await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
+                    await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
+
+        task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
+        if not task:
+            txt = '📭 No tasks available right now.'
+            try:
+                await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
+            except:
+                await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
+            await call.answer()
+            return
+        
+        task_id = task['id']
+        title = task['title']
+        details = task['details']
+        reward = task['reward']
+        
+        async with conn.transaction():
+            await conn.execute("UPDATE tasks SET status='assigned' WHERE id=$1", task_id)
+            await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
+
+    try:
+        parts = details.split(" | ")
+        username = parts[0].replace("Email: ", "").strip()
+        password = parts[1].replace("Pass: ", "").strip()
+    except:
+        username = title.replace("Login to ", "")
+        password = "See Admin"
+
+    txt = (
+        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}\n\n'
+        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.'
+    )
+    try:
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+    except:
+        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
     await call.answer()
 
 @dp.callback_query(F.data == "menu_balance")
 async def cb_balance(call: CallbackQuery, state: FSMContext):
-    await balance(call.message, state)
+    await state.clear()
+    user_data = await get_user_data(call.from_user.id)
+    bal = user_data['balance'] if user_data else 0.0
+    upi = user_data['upi'] if user_data and user_data['upi'] else "None"
+    upi_set = upi != "None" and upi != ""
+    
+    text = (
+        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance: ₹{bal:.2f}</b>\n'
+        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> <b>UPI:</b> {upi}'
+    )
+    
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+    except Exception:
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
     await call.answer()
 
 @dp.callback_query(F.data == "menu_sell_gmail")
 async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
-    await sell(call.message, state)
+    await state.clear()
+    await state.set_state(UserState.selling_username)
+    txt = '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail **Username** (e.g., `example@gmail.com`):'
+    try:
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML)
+    except:
+        await call.message.answer(txt, parse_mode=ParseMode.HTML)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_history")
 async def cb_history(call: CallbackQuery, state: FSMContext):
-    await history(call.message, state)
+    await state.clear()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", call.from_user.id)
+    if not rows:
+        txt = "📭 No transactions found."
+        try:
+            await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
+        except:
+            await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
+        await call.answer()
+        return
+    text = '<tg-emoji emoji-id="5008025248314950702">😀</tg-emoji> <b>Last Transactions</b>\n\n'
+    for r in rows:
+        sign = "+" if r['amount'] >= 0 else ""
+        text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    except:
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await call.answer()
 
 @dp.callback_query(F.data == "menu_support")
 async def cb_support(call: CallbackQuery, state: FSMContext):
-    await support_button_handler(call.message, state)
+    await state.clear()
+    await state.set_state(UserState.waiting_for_support)
+    txt = (
+        "🛠 <b>Customer Support</b>\n\n"
+        "Please send your help message or describe your issue below. Our admin team will look into it shortly."
+    )
+    try:
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    except:
+        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
     await call.answer()
 
 # ============================================
@@ -549,7 +692,7 @@ async def process_user_support_message(message: Message, state: FSMContext):
     await state.clear()
 
 # ============================================
-# USER MENU ACTIONS
+# USER MENU ACTIONS (COMMAND FALLBACKS)
 # ============================================
 
 @dp.message(Command('task'), StateFilter("*"))
@@ -557,7 +700,6 @@ async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        
         existing = await conn.fetchrow('''
             SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at 
             FROM task_assignments a
