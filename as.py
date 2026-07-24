@@ -225,34 +225,39 @@ def get_must_join_keyboard():
     return kb.as_markup()
 
 def get_main_menu_keyboard():
-    kb = ReplyKeyboardBuilder()
+    kb = InlineKeyboardBuilder()
     kb.button(
-        text="✍️ Get Task",
+        text="Get Task",
+        callback_data="menu_get_task",
         icon_custom_emoji_id="5197269100878907942",
         style="success"
     )
     kb.button(
         text="Balance",
+        callback_data="menu_balance",
         icon_custom_emoji_id="5417924076503062111",
         style="primary"
     )
     kb.button(
         text="Sell Gmail",
+        callback_data="menu_sell_gmail",
         icon_custom_emoji_id="5377548235709619284",
         style="success"
     )
     kb.button(
         text="History",
+        callback_data="menu_history",
         icon_custom_emoji_id="5008025248314950702",
         style="primary"
     )
     kb.button(
         text="Support",
+        callback_data="menu_support",
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
     kb.adjust(2, 2, 1)
-    return kb.as_markup(resize_keyboard=True)
+    return kb.as_markup()
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
@@ -462,6 +467,35 @@ async def return_to_main_menu(message: Message, state: FSMContext):
     await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
 
 # ============================================
+# INLINE MAIN MENU CALLBACK HANDLERS
+# ============================================
+
+@dp.callback_query(F.data == "menu_get_task")
+async def cb_get_task(call: CallbackQuery, state: FSMContext):
+    await get_task(call.message, state)
+    await call.answer()
+
+@dp.callback_query(F.data == "menu_balance")
+async def cb_balance(call: CallbackQuery, state: FSMContext):
+    await balance(call.message, state)
+    await call.answer()
+
+@dp.callback_query(F.data == "menu_sell_gmail")
+async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
+    await sell(call.message, state)
+    await call.answer()
+
+@dp.callback_query(F.data == "menu_history")
+async def cb_history(call: CallbackQuery, state: FSMContext):
+    await history(call.message, state)
+    await call.answer()
+
+@dp.callback_query(F.data == "menu_support")
+async def cb_support(call: CallbackQuery, state: FSMContext):
+    await support_button_handler(call.message, state)
+    await call.answer()
+
+# ============================================
 # SUPPORT SYSTEM
 # ============================================
 
@@ -515,11 +549,10 @@ async def process_user_support_message(message: Message, state: FSMContext):
     await state.clear()
 
 # ============================================
-# USER MENU BUTTONS (INTERRUPTS STATES)
+# USER MENU ACTIONS
 # ============================================
 
 @dp.message(Command('task'), StateFilter("*"))
-@dp.message(F.text == "✍️ Get Task", StateFilter("*"))
 async def get_task(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
@@ -605,7 +638,6 @@ async def get_task(message: Message, state: FSMContext):
     )
 
 @dp.message(Command("balance"), StateFilter("*"))
-@dp.message(F.text == "💰 Balance", StateFilter("*"))
 async def balance(message: Message, state: FSMContext):
     await state.clear()
     user_data = await get_user_data(message.from_user.id)
@@ -622,7 +654,6 @@ async def balance(message: Message, state: FSMContext):
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
 
 @dp.message(Command("sell"), StateFilter("*"))
-@dp.message(F.text == "📨 Sell Gmail", StateFilter("*"))
 async def sell(message: Message, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
@@ -686,7 +717,6 @@ async def process_sell_password(message: Message, state: FSMContext):
     await state.clear()
 
 @dp.message(Command("history"), StateFilter("*"))
-@dp.message(F.text == "📜 History", StateFilter("*"))
 async def history(message: Message, state: FSMContext):
     await state.clear()
     async with db_pool.acquire() as conn:
@@ -1315,21 +1345,6 @@ async def process_remove_task_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid Task ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(Command("mustjoin"), StateFilter("*"))
-@dp.message(F.text == "📢 Must Join Channel", StateFilter("*"))
-async def set_must_join_command(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_for_channel_link)
-    current = MUST_JOIN_CHANNEL if MUST_JOIN_CHANNEL else "Disabled"
-    await message.answer(
-        f"📢 <b>Must Join Channel Settings</b>\n\n"
-        f"Currently set to: <code>{current}</code>\n\n"
-        f"Send the channel username (e.g. <code>@MyChannel</code>) or link (e.g. <code>https://t.me/MyChannel</code>).\n\n"
-        f"<i>Type <code>none</code> to disable forced channel joining.</i>",
-        parse_mode=ParseMode.HTML
-    )
-
 # ============================================
 # USER INLINE SUBMIT & CANCEL SYSTEM
 # ============================================
@@ -1765,7 +1780,7 @@ async def auto_expire_tasks():
                             await conn.execute('DELETE FROM task_assignments WHERE task_id=$1', task_id)
                             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
                         try:
-                            await bot.send_message(user_id, f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "✍️ Get Task" to get a new task.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                            await bot.send_message(user_id, f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "Get Task" to get a new task.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                         except:
                             pass
         except Exception as e:
